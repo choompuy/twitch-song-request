@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="css/preview.css" />
+    <title>Song Request Preview</title>
+  </head>
+  <body>
+    <div class="container">
+      <div class="now-playing" id="nowPlaying">
+        <div class="player-wrapper" id="playerWrapper">
+          <div id="player"></div>
+        </div>
+        <div class="song-info" id="songInfo">
+          <img class="thumbnail" id="currentThumbnail" alt="" />
+          <div class="title" id="currentTitle"></div>
+          <div class="channel" id="currentChannel"></div>
+          <div class="meta">
+            <span id="currentDuration"></span>
+            <span id="currentViews"></span>
+            <span class="requester" id="currentRequester"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="queue" id="queue">
+        <div class="queue-header">Queue</div>
+        <div id="queueList"></div>
+      </div>
+    </div>
+
+    <script src="js/preview.js"></script>
+  </body>
+</html>
