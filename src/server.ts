@@ -1,15 +1,44 @@
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
+import open from 'open'
 
-import { config } from './config.js'
+import { getPublicSecretsView, updateSecrets } from './secrets.js'
+import { getRuntimeConfig, updateRuntimeConfig } from './runtimeConfig.js'
 import { searchSongs, getVideoById, selectBestSong } from './youtube.js'
-import { getState, addSong, removeAt, clearQueue, moveToNext, skipCurrent, setCurrent } from './queue.js'
+import {
+  getState,
+  addSong,
+  removeAt,
+  clearQueue,
+  moveToNext,
+  skipCurrent,
+  setCurrent,
+  refreshFallbackPlaylist,
+  getFallbackState
+} from './queue.js'
 import { getSettings, updateSettings } from './settings.js'
 
 const app = express()
+const PORT = Number(process.env.PORT) || 3000
 
-app.use(cors())
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true)
+
+    try {
+      const url = new URL(origin)
+      const isLocalHost = url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+      const isLan = url.hostname.startsWith('192.168.') || url.hostname.startsWith('10.')
+      const isSamePort = url.port === String(PORT)
+
+      if ((isLocalHost || isLan) && isSamePort) return callback(null, true)
+    } catch {
+    }
+
+    callback(new Error('Not allowed by CORS'))
+  }
+}))
 app.use(express.json())
 app.use(express.static('public'))
 
@@ -94,57 +123,44 @@ function getErrorInfo(error: unknown): {
 } {
   const message = error instanceof Error ? error.message : 'не удалось добавить трек'
 
-  if (message.includes('already playing') || message.includes('already in the queue') || message.includes('уже находится')) {
-    return {
+  const errorTable = [
+    {
+      test: (m: string) => m.includes('already playing') || m.includes('already in the queue') || m.includes('уже находится'),
       code: 'DUPLICATE',
-      status: 409,
-      message
-    }
-  }
-
-  if (message.includes('queue is full') || message.includes('очередь заполнена')) {
-    return {
+      status: 409
+    },
+    {
+      test: (m: string) => m.includes('queue is full') || m.includes('очередь заполнена'),
       code: 'QUEUE_FULL',
-      status: 409,
-      message
-    }
-  }
-
-  if (message.includes('active requests') || message.includes('вы можете заказать')) {
-    return {
+      status: 409
+    },
+    {
+      test: (m: string) => m.includes('active requests') || m.includes('вы можете заказать'),
       code: 'USER_LIMIT',
-      status: 409,
-      message
-    }
-  }
-
-  if (message.includes('cooldown') || message.includes('слишком часто')) {
-    return {
+      status: 409
+    },
+    {
+      test: (m: string) => m.includes('cooldown') || m.includes('слишком часто'),
       code: 'COOLDOWN',
-      status: 409,
-      message
-    }
-  }
-
-  if (message.includes('YouTube API quota') || message.includes('лимит YouTube API')) {
-    return {
+      status: 409
+    },
+    {
+      test: (m: string) => m.includes('YouTube API quota') || m.includes('лимит YouTube API'),
       code: 'YOUTUBE_QUOTA',
-      status: 503,
-      message
-    }
-  }
-
-  if (message.includes('YouTube')) {
-    return {
+      status: 503
+    },
+    {
+      test: (m: string) => m.includes('YouTube'),
       code: 'YOUTUBE_ERROR',
-      status: 503,
-      message
+      status: 503
     }
-  }
+  ]
+
+  const matched = errorTable.find((entry) => entry.test(message))
 
   return {
-    code: 'SERVER_ERROR',
-    status: 500,
+    code: matched?.code ?? 'SERVER_ERROR',
+    status: matched?.status ?? 500,
     message
   }
 }
@@ -166,6 +182,30 @@ app.get('/api/settings', (_req, res) => {
 app.put('/api/settings', (req, res) => {
   const updates = req.body ?? {}
   const updated = updateSettings(updates)
+
+  res.json(updated)
+})
+
+app.get('/api/config', (_req, res) => {
+  res.json(getRuntimeConfig())
+})
+
+app.put('/api/config', async (req, res) => {
+  const previous = getRuntimeConfig()
+  const updated = updateRuntimeConfig(req.body ?? {})
+
+  if (updated.fallbackPlaylistId !== previous.fallbackPlaylistId) {
+    try {
+      await refreshFallbackPlaylist()
+    } catch (error) {
+      log(`[ERROR] Failed to refresh fallback playlist: ${error instanceof Error ? error.message : error}`)
+
+      return res.json({
+        ...updated,
+        fallbackPlaylistWarning: 'не удалось загрузить плейлист, проверьте ID'
+      })
+    }
+  }
 
   res.json(updated)
 })
@@ -307,13 +347,26 @@ app.post('/api/player/ended', (_req, res) => {
   })
 })
 
-app.post('/api/player/skip', (_req, res) => {
+app.post('/api/player/skip', (req, res) => {
   skipCurrent()
 
   return res.json({
     success: true,
     state: getState()
   })
+})
+
+app.get('/api/fallback', (_req, res) => {
+  res.json(getFallbackState())
+})
+
+app.post('/api/fallback/refresh', async (_req, res) => {
+  try {
+    await refreshFallbackPlaylist()
+    res.json({ success: true, ...getFallbackState() })
+  } catch (error) {
+    res.status(400).json({ success: false, error: 'не удалось обновить плейлист, проверь ID' })
+  }
 })
 
 app.delete('/api/queue/:index', (req, res) => {
@@ -344,13 +397,22 @@ app.delete('/api/queue/:index', (req, res) => {
   })
 })
 
-app.post('/api/queue/clear', (_req, res) => {
+app.post('/api/queue/clear', (req, res) => {
   clearQueue()
 
   return res.json({
     success: true,
     state: getState()
   })
+})
+
+app.get('/api/secrets', (_req, res) => {
+  res.json(getPublicSecretsView())
+})
+
+app.put('/api/secrets', (req, res) => {
+  updateSecrets(req.body ?? {})
+  res.json(getPublicSecretsView())
 })
 
 app.use('/api', (_req, res) => {
@@ -371,6 +433,14 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   })
 })
 
-app.listen(config.port, () => {
-  log(`Server running on http://localhost:${config.port}`)
+app.listen(3000, async () => {
+  log(`Server running on http://localhost:3000`)
+
+  await refreshFallbackPlaylist()
+
+  if (!getState().current) {
+    moveToNext()
+  }
+
+  open(`http://localhost:3000`).catch(() => {})
 })

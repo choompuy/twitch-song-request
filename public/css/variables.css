@@ -1,0 +1,18 @@
+:root {
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+
+  --bg: #0f0f13;
+  --bg-panel: #1a1a1e;
+  --bg-elevated: #2a2a30;
+  --bg-hover: #3a3a40;
+
+  --text-primary: #e0e0e0;
+  --text-secondary: #888;
+  --text-muted: #666;
+
+  --accent-blue: #3b82f6;
+  --accent-green: #4caf50;
+  --accent-red: #ff4d4d;
+  --accent-red-hover: #612929;
+}

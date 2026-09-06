@@ -4,145 +4,46 @@ let isPlayerReady = false
 let isTransitioning = false
 let settings = {}
 
-function log(message) {
-  console.log(`[PREVIEW] ${message}`)
-}
-
-function escapeHtml(value) {
-  return String(value).replace(
-    /[&<>"']/g,
-    (c) =>
-      ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#x27;'
-      })[c]
-  )
-}
-
-function formatDuration(seconds) {
-  const mins = Math.floor(seconds / 60)
-  const secs = seconds % 60
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
-
-function formatViews(views) {
-  if (views >= 1000000) return `${(views / 1000000).toFixed(1)}M`
-  if (views >= 1000) return `${(views / 1000).toFixed(1)}K`
-  return views.toString()
-}
+const log = createLogger('PREVIEW')
 
 async function fetchSettings() {
   try {
     const response = await fetch('/api/settings')
-    const result = await response.json()
-    Object.assign(settings, result)
-    applySettings()
+    settings = await response.json()
   } catch (error) {
     log('Error fetching settings:', error)
-    return {}
   }
 }
 
-function applySettings() {
+function updateMediaVisibility(state) {
   const playerWrapper = document.getElementById('playerWrapper')
-  const songInfo = document.getElementById('songInfo')
-  const currentThumbnail = document.getElementById('currentThumbnail')
-  const currentRequester = document.getElementById('currentRequester')
-  const queue = document.getElementById('queue')
+  const thumbnail = document.querySelector('.now-playing-badge .thumbnail')
 
-  if (settings.showVideo) {
-    playerWrapper.classList.add('visible')
-  } else {
-    playerWrapper.classList.remove('visible')
-  }
+  const showVideo = settings.showVideo || overrideActive
 
-  if (settings.showSongInfo) {
-    songInfo.classList.add('visible')
-  } else {
-    songInfo.classList.remove('visible')
-  }
-
-  if (settings.showThumbnail) {
-    currentThumbnail.classList.add('visible')
-  } else {
-    currentThumbnail.classList.remove('visible')
-  }
-
-  if (settings.showRequester) {
-    currentRequester.classList.add('visible')
-  } else {
-    currentRequester.classList.remove('visible')
-  }
-
-  if (settings.showQueue) {
-    queue.classList.add('visible')
-  } else {
-    queue.classList.remove('visible')
-  }
+  playerWrapper.classList.toggle('visible', showVideo)
+  thumbnail.classList.toggle('hidden', showVideo)
 }
 
 function renderCurrent(state) {
-  const nowPlaying = document.getElementById('nowPlaying')
-  const currentThumbnail = document.getElementById('currentThumbnail')
-  const currentTitle = document.getElementById('currentTitle')
-  const currentChannel = document.getElementById('currentChannel')
-  const currentDuration = document.getElementById('currentDuration')
-  const currentViews = document.getElementById('currentViews')
-  const currentRequester = document.getElementById('currentRequester')
+  const badge = document.querySelector('.now-playing-badge')
 
-  if (state.current) {
-    nowPlaying.classList.add('visible')
-    currentThumbnail.src = state.current.thumbnail
-    currentTitle.textContent = state.current.title
-    currentChannel.textContent = state.current.channelTitle
-    currentDuration.textContent = formatDuration(state.current.duration)
-    currentViews.textContent = `${formatViews(state.current.views)} views`
-    currentRequester.textContent = `@${escapeHtml(state.current.requestedBy)}`
-  } else {
-    nowPlaying.classList.remove('visible')
-  }
-}
-
-function renderQueue(state) {
-  if (!settings.showQueue) return
-
-  const queue = document.getElementById('queue')
-  const queueList = document.getElementById('queueList')
-
-  if (state.queue?.length <= 0) {
-    queue.style.display = null
-    queueList.innerHTML = ''
+  if (!state.current) {
+    badge.classList.remove('visible')
     return
   }
 
-  queue.style.display = 'block'
-  queueList.innerHTML = state.queue
-    .map(
-      (item, index) => `
-          <div class="queue-item">
-            <span class="position">#${index + 1}</span>
-            <img class="thumbnail ${settings.showThumbnail ? 'visible' : ''}" src="${escapeHtml(item.thumbnail)}" alt="">
-            <div class="info">
-            <div class="title">${escapeHtml(item.title)}</div>
-            <div class="meta">
-              <span>${formatDuration(item.duration)}</span>
-              <span>${formatViews(item.views)} views</span>
-              <span class="requester ${settings.showRequester ? 'visible' : ''}">@${escapeHtml(item.requestedBy)}</span>
-            </div>
-            </div>
-          </div>
-        `
-    )
-    .join('')
+  document.querySelector('.now-playing-badge .thumbnail').src = state.current.thumbnail
+  document.querySelector('.now-playing-badge .title').textContent = state.current.title
+  document.querySelector('.now-playing-badge .channel').textContent = state.current.channelTitle
+
+  badge.classList.add('visible')
 }
 
 function renderState(state) {
   currentState = state
   renderCurrent(state)
-  renderQueue(state)
+  updateMediaVisibility(state)
 
   if (isPlayerReady && state.current) {
     const currentVideoId = player.getVideoData()?.video_id
@@ -151,6 +52,10 @@ function renderState(state) {
       log(`Loading video: ${state.current.videoId}`)
 
       player.loadVideoById(state.current.videoId)
+
+      if (!settings.showVideo) {
+        player.setPlaybackQuality('tiny')
+      }
     }
   } else if (isPlayerReady && !state.current && !isTransitioning) {
     player.stopVideo()
@@ -197,15 +102,7 @@ function onPlayerStateChange(event) {
 }
 
 function onPlayerError(event) {
-  const errorMessages = {
-    2: 'Invalid parameter',
-    5: 'HTML5 player error',
-    100: 'Video not found',
-    101: 'Embed not allowed',
-    150: 'Embed not allowed'
-  }
-
-  const message = errorMessages[event.data] || `Error code ${event.data}`
+  const message = getErrorMessage(event.data)
   log(`Player error: ${message}`)
 
   if (!isTransitioning) {

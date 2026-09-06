@@ -8,28 +8,20 @@
   </head>
   <body>
     <div class="container">
-      <div class="now-playing" id="nowPlaying">
-        <div class="player-wrapper" id="playerWrapper">
-          <div id="player"></div>
-        </div>
-        <div class="song-info" id="songInfo">
-          <img class="thumbnail" id="currentThumbnail" alt="" />
+      <div class="now-playing-badge" id="nowPlaying">
+        <img class="thumbnail" id="currentThumbnail" alt="" />
+        <div class="text">
           <div class="title" id="currentTitle"></div>
           <div class="channel" id="currentChannel"></div>
-          <div class="meta">
-            <span id="currentDuration"></span>
-            <span id="currentViews"></span>
-            <span class="requester" id="currentRequester"></span>
-          </div>
         </div>
       </div>
 
-      <div class="queue" id="queue">
-        <div class="queue-header">Queue</div>
-        <div id="queueList"></div>
+      <div class="player-wrapper" id="playerWrapper">
+        <div id="player"></div>
       </div>
     </div>
 
+    <script src="js/shared.js"></script>
     <script src="js/preview.js"></script>
   </body>
 </html>

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-
-import { config } from './config.js'
+import { getSecrets } from './secrets.js'
+import { getRuntimeConfig } from './runtimeConfig.js'
 
 type SearchItem = {
   id?: {
@@ -64,26 +64,34 @@ type VideoCacheEntry = {
 type CacheFile = {
   searches: Record<string, SearchCacheEntry>
   videos: Record<string, VideoCacheEntry>
+  playlists: Record<string, PlaylistCacheEntry>
   quota: {
     date: string
     searches: number
   }
 }
 
+type PlaylistCacheEntry = {
+  songs: Song[]
+  expiresAt: number
+}
+
 const DATA_DIR = join(process.cwd(), 'cache')
 const CACHE_FILE = join(DATA_DIR, 'youtube-cache.json')
 
 const VIDEO_CACHE_TTL = 10 * 60 * 1000
-const SEARCH_CACHE_TTL = config.searchCacheTtlSeconds * 1000
-const MAX_DAILY_SEARCHES = config.maxSearchesPerDay
+const SEARCH_CACHE_TTL = 3600 * 1000 // 1 hour
+const MAX_DAILY_SEARCHES = 80 // Maximum number of searches allowed per day
 
 const pendingSearches = new Map<string, Promise<Song[]>>()
 const pendingVideos = new Map<string, Promise<Song | null>>()
+const pendingPlaylists = new Map<string, Promise<Song[]>>()
 
 function createEmptyCache(): CacheFile {
   return {
     searches: {},
     videos: {},
+    playlists: {},
     quota: {
       date: getQuotaDate(),
       searches: 0
@@ -107,6 +115,7 @@ function loadCache(): CacheFile {
     const cache: CacheFile = {
       searches: data.searches ?? {},
       videos: data.videos ?? {},
+      playlists: data.playlists ?? {},
       quota: {
         date: data.quota?.date ?? getQuotaDate(),
         searches: data.quota?.searches ?? 0
@@ -323,10 +332,11 @@ function combinedScore(song: Song, query: string): number {
 }
 
 function isValidSong(song: Song, video: VideoItem): boolean {
+  const runtimeConfig = getRuntimeConfig()
   const isMusic = video.snippet?.categoryId === '10'
   const isEmbeddable = video.status?.embeddable !== false
-  const validDuration = song.duration >= 60 && song.duration <= config.maxDurationSeconds
-  const validViews = song.views >= config.minViews
+  const validDuration = song.duration >= 60 && song.duration <= runtimeConfig.maxDurationSeconds
+  const validViews = song.views >= runtimeConfig.minViews
 
   return isMusic && isEmbeddable && validDuration && validViews
 }
@@ -344,15 +354,17 @@ function videoToSong(video: VideoItem): Song {
 }
 
 async function youtube<T>(path: string, params: Record<string, string>): Promise<T> {
-  if (!config.youtubeApiKey) {
-    throw new Error('YOUTUBE_API_KEY is not configured')
+  const { youtubeApiKey } = getSecrets()
+
+  if (!youtubeApiKey) {
+    throw new Error('YouTube API ключ не настроен, добавь его в панели управления')
   }
 
   const url = new URL(`https://www.googleapis.com/youtube/v3/${path}`)
 
   Object.entries({
     ...params,
-    key: config.youtubeApiKey
+    key: youtubeApiKey
   }).forEach(([key, value]) => {
     url.searchParams.set(key, value)
   })
@@ -510,7 +522,7 @@ async function performSearch(query: string): Promise<Song[]> {
       videoCategoryId: '10',
       videoEmbeddable: 'true',
       videoSyndicated: 'true',
-      maxResults: String(config.searchResults),
+      maxResults: '10',
       order: 'relevance',
       safeSearch: 'moderate'
     })
@@ -585,4 +597,88 @@ function formatViews(views: number): string {
   if (views >= 1_000_000) return `${(views / 1_000_000).toFixed(1)}M`
   if (views >= 1_000) return `${(views / 1_000).toFixed(1)}K`
   return views.toString()
+}
+
+export async function fetchPlaylistSongs(playlistId: string): Promise<Song[]> {
+  const { fallbackPlaylistId } = getRuntimeConfig()
+
+  if (!fallbackPlaylistId) {
+    return []
+  }
+
+  const cached = cache.playlists[playlistId]
+  if (cached && cached.expiresAt > Date.now()) {
+    console.log(`[PLAYLIST] Using cached playlist: ${playlistId}`)
+    return cached.songs
+  }
+
+  const existing = pendingPlaylists.get(playlistId)
+  if (existing) {
+    return existing
+  }
+
+  const request = (async () => {
+    try {
+      console.log(`[PLAYLIST] Fetching playlist: ${playlistId}`)
+
+      const playlist = await youtube<{
+        items: Array<{
+          snippet?: {
+            resourceId?: {
+              videoId?: string
+            }
+          }
+        }>
+      }>('playlistItems', {
+        part: 'snippet',
+        playlistId,
+        maxResults: '50'
+      })
+
+      const videoIds = (playlist.items ?? []).map((item) => item.snippet?.resourceId?.videoId).filter((id): id is string => Boolean(id))
+
+      if (!videoIds.length) {
+        console.log(`[PLAYLIST] No videos in playlist: ${playlistId}`)
+        return []
+      }
+
+      const details = await youtube<{
+        items: VideoItem[]
+      }>('videos', {
+        part: 'snippet,contentDetails,statistics',
+        id: videoIds.join(',')
+      })
+
+      const songs: Song[] = []
+
+      for (const video of details.items ?? []) {
+        const song = videoToSong(video)
+        if (song) {
+          songs.push(song)
+        }
+      }
+
+      const ttl = 6 * 60 * 60 * 1000 // Cache for 6 hours
+      cache.playlists[playlistId] = {
+        songs,
+        expiresAt: Date.now() + ttl
+      }
+      saveCache(cache)
+
+      console.log(`[PLAYLIST] Fetched ${songs.length} songs from playlist: ${playlistId}`)
+
+      return songs
+    } catch (error) {
+      console.error('[ERROR] Playlist fetch:', error instanceof Error ? error.message : error)
+      return []
+    }
+  })()
+
+  pendingPlaylists.set(playlistId, request)
+
+  try {
+    return await request
+  } finally {
+    pendingPlaylists.delete(playlistId)
+  }
 }

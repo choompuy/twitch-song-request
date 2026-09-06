@@ -31,17 +31,18 @@ npm run dev
 
 For `!sr <query>`:
 
-1. HTTP GET `http://localhost:3000/api/search?q=<encoded query>`
-2. Take the first result.
-3. HTTP POST `http://localhost:3000/api/queue`
-4. JSON body:
+HTTP POST `http://localhost:3000/api/queue/request`
+
+JSON body:
 
 ```json
 {
-  "song": { "...": "first search result" },
-  "requestedBy": "TwitchUsername"
+  "query": "<text or YouTube URL>",
+  "requestedBy": "<TwitchUsername>"
 }
 ```
+
+The backend automatically detects whether the query is a YouTube URL or a search term, searches YouTube, validates the video, and adds it to the queue or starts playing immediately if the queue is empty.
 
 The web player consumes the queue and automatically starts the next item when YouTube reports `ENDED`.
 
