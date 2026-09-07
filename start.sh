@@ -12,7 +12,7 @@ if [ ! -d "node_modules" ]; then
   npm install
 fi
 
-read -p "Port (Enter — по умолчанию 3000): " PORT
+read -p "Port (Enter - default 3000): " PORT
 export PORT=${PORT:-3000}
 
 npm start

@@ -52,14 +52,6 @@ body {
   overflow-y: auto;
 }
 
-.now-playing {
-  display: none;
-}
-
-.now-playing.visible {
-  display: block;
-}
-
 .player-wrapper {
   aspect-ratio: 16 / 9;
   background: var(--bg-elevated);
@@ -89,57 +81,20 @@ body {
   overflow: hidden;
 }
 
-.song-info .title {
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-
-.song-info .channel {
-  font-size: 1rem;
-  color: var(--text-secondary);
-}
-
 .song-info .meta {
   display: flex;
   flex-wrap: wrap;
   gap: 1rem;
-  color: var(--text-muted);
-  font-size: 0.875rem;
 }
 
 .song-info .requester {
   color: var(--accent-green);
-  font-weight: 500;
-}
-
-.player-controls {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-
-.add-song {
-  display: flex;
-  flex-direction: row;
-  gap: 0.5rem;
 }
 
 .queue-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-
-.queue-count {
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-}
-
-.empty {
-  padding: 1rem;
-  color: var(--text-muted);
-  font-size: 0.875rem;
-  text-align: center;
 }
 
 .preview-url {
@@ -177,5 +132,5 @@ body {
   flex-direction: column;
   gap: 0.25rem;
   font-size: 0.75rem;
-  color: #888;
+  color: var(--text-secondary);
 }

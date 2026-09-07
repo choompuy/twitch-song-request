@@ -13,7 +13,7 @@ if not exist node_modules (
   call npm install
 )
 
-set /p PORT="Port (Enter — по умолчанию 3000): "
+set /p PORT="Port (Enter - default 3000): "
 if "%PORT%"=="" set PORT=3000
 
 call npm start

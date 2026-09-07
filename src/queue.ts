@@ -17,6 +17,7 @@ export type PlayerState = {
   current: QueueItem | null
   queue: QueueItem[]
   isPlaying: boolean
+  isPaused: boolean
 }
 
 type StateFile = {
@@ -31,13 +32,12 @@ const STATE_FILE = join(DATA_DIR, 'queue-state.json')
 let currentSong: QueueItem | null = null
 const queue: QueueItem[] = []
 
+let isPaused = false
+
 let fallbackTracks: Song[] = []
 let fallbackIndex = 0
-let isFallbackLoaded = false
 let loadedFallbackPlaylistId: string | null = null
 let lastFallbackRefreshAt: number | null = null
-
-let videoOverrideId: string | null = null
 
 const userLastRequestTime = new Map<string, number>()
 
@@ -121,7 +121,7 @@ export async function refreshFallbackPlaylist(): Promise<void> {
 
   const songs = await fetchPlaylistSongs(playlistId)
 
-  fallbackTracks = shuffle(songs).map((song) => ({
+  fallbackTracks = songs.map((song) => ({
     ...song,
     requestedBy: 'Jam',
     addedAt: 0,
@@ -134,6 +134,12 @@ export async function refreshFallbackPlaylist(): Promise<void> {
   log(`[FALLBACK] Loaded ${fallbackTracks.length} tracks from playlist ${playlistId}`)
 }
 
+export function shuffleFallback(): void {
+  fallbackTracks = shuffle(fallbackTracks)
+  fallbackIndex = 0
+  log(`[FALLBACK] Shuffled ${fallbackTracks.length} tracks`)
+}
+
 export function getFallbackState() {
   return {
     playlistId: loadedFallbackPlaylistId,
@@ -143,12 +149,13 @@ export function getFallbackState() {
       videoId: track.videoId,
       title: track.title,
       channelTitle: track.channelTitle,
-      thumbnail: track.thumbnail
+      thumbnail: track.thumbnail,
+      duration: track.duration
     }))
   }
 }
 
-function nextFallbackTrack(): Song | null {
+function nextFallbackTrack(): QueueItem | null {
   if (!fallbackTracks.length) return null
 
   if (fallbackIndex >= fallbackTracks.length) {
@@ -156,72 +163,7 @@ function nextFallbackTrack(): Song | null {
     fallbackIndex = 0
   }
 
-  return fallbackTracks[fallbackIndex++]
-}
-
-async function initializeFallback(): Promise<void> {
-  await loadFallbackTracks()
-
-  if (!currentSong && fallbackTracks.length > 0) {
-    const fallback = getNextFallbackTrack()
-    if (fallback) {
-      setCurrent(fallback)
-      log(`[PLAYER] initialized with fallback: "${fallback.title}"`)
-    }
-  }
-}
-
-initializeFallback()
-
-function getUserActiveCount(username: string): number {
-  const normalized = username.toLowerCase()
-  let count = 0
-
-  if (currentSong && currentSong.requestedBy.toLowerCase() === normalized) {
-    count++
-  }
-
-  count += queue.filter((item) => item.requestedBy.toLowerCase() === normalized).length
-
-  return count
-}
-
-async function loadFallbackTracks(): Promise<void> {
-  const runtimeConfig = getRuntimeConfig()
-
-  if (!runtimeConfig.fallbackPlaylistId || isFallbackLoaded) {
-    return
-  }
-
-  try {
-    fallbackTracks = await fetchPlaylistSongs(runtimeConfig.fallbackPlaylistId)
-
-    if (fallbackTracks.length > 0) {
-      shuffleArray(fallbackTracks)
-      fallbackIndex = 0
-      isFallbackLoaded = true
-      log(`[FALLBACK] Loaded ${fallbackTracks.length} tracks from playlist`)
-    }
-  } catch (error) {
-    console.error('[QUEUE] Failed to load fallback tracks:', error instanceof Error ? error.message : error)
-  }
-}
-
-function shuffleArray<T>(array: T[]): void {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[array[i], array[j]] = [array[j], array[i]]
-  }
-}
-
-function getNextFallbackTrack(): QueueItem | null {
-  if (fallbackTracks.length === 0) {
-    return null
-  }
-
-  const song = fallbackTracks[fallbackIndex]
-  fallbackIndex = (fallbackIndex + 1) % fallbackTracks.length
-
+  const song = fallbackTracks[fallbackIndex++]
   return {
     ...song,
     requestedBy: 'Jam',
@@ -230,11 +172,17 @@ function getNextFallbackTrack(): QueueItem | null {
   }
 }
 
+function getUserActiveCount(username: string): number {
+  const normalized = username.toLowerCase()
+  return queue.filter((item) => item.requestedBy.toLowerCase() === normalized).length
+}
+
 export function getState(): PlayerState {
   return {
     current: currentSong,
     queue: [...queue],
     isPlaying: currentSong !== null,
+    isPaused
   }
 }
 
@@ -246,9 +194,12 @@ export function getCurrent() {
   return currentSong
 }
 
+export function setPaused(value: boolean): void {
+  isPaused = value
+}
 
-export function getVideoOverride(): string | null {
-  return videoOverrideId
+export function getIsPaused(): boolean {
+  return isPaused
 }
 
 export function addSong(song: Song, requestedBy: string, addToQueue: boolean = true): QueueItem {
@@ -316,14 +267,13 @@ export function setCurrent(item: QueueItem | null): void {
 }
 
 export function moveToNext(): QueueItem | null {
-  videoOverrideId = null
   const next = queue.shift() ?? null
 
   if (next) {
     setCurrent(next)
     log(`[PLAYER] moved to next: "${next.title}"`)
   } else {
-    const fallback = getNextFallbackTrack()
+    const fallback = nextFallbackTrack()
     if (fallback) {
       setCurrent(fallback)
       log(`[PLAYER] started fallback: "${fallback.title}"`)
@@ -363,7 +313,6 @@ export function clearQueue(): QueueItem[] {
 }
 
 export function skipCurrent(): QueueItem | null {
-  videoOverrideId = null
   const skipped = currentSong
 
   if (skipped) {

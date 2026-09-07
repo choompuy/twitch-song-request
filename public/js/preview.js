@@ -19,10 +19,8 @@ function updateMediaVisibility(state) {
   const playerWrapper = document.getElementById('playerWrapper')
   const thumbnail = document.querySelector('.now-playing-badge .thumbnail')
 
-  const showVideo = settings.showVideo || overrideActive
-
-  playerWrapper.classList.toggle('visible', showVideo)
-  thumbnail.classList.toggle('hidden', showVideo)
+  playerWrapper.classList.toggle('hidden', !settings.showVideo)
+  thumbnail.classList.toggle('hidden', settings.showVideo)
 }
 
 function renderCurrent(state) {
@@ -33,9 +31,12 @@ function renderCurrent(state) {
     return
   }
 
-  document.querySelector('.now-playing-badge .thumbnail').src = state.current.thumbnail
-  document.querySelector('.now-playing-badge .title').textContent = state.current.title
-  document.querySelector('.now-playing-badge .channel').textContent = state.current.channelTitle
+  console.log(state);
+
+  document.querySelector('#currentThumbnail').src = state.current.thumbnail
+  document.querySelector('#currentTitle').textContent = state.current.title
+  document.querySelector('#currentChannel').textContent = state.current.channelTitle
+  document.querySelector('#currentRequester').textContent = `@${state.current.requestedBy}`
 
   badge.classList.add('visible')
 }
@@ -44,6 +45,14 @@ function renderState(state) {
   currentState = state
   renderCurrent(state)
   updateMediaVisibility(state)
+
+  if (isPlayerReady) {
+    if (state.isPaused) {
+      player.pauseVideo()
+    } else if (player.getPlayerState() === YT.PlayerState.PAUSED) {
+      player.playVideo()
+    }
+  }
 
   if (isPlayerReady && state.current) {
     const currentVideoId = player.getVideoData()?.video_id

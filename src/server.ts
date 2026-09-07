@@ -15,6 +15,8 @@ import {
   skipCurrent,
   setCurrent,
   refreshFallbackPlaylist,
+  shuffleFallback,
+  setPaused,
   getFallbackState
 } from './queue.js'
 import { getSettings, updateSettings } from './settings.js'
@@ -356,6 +358,24 @@ app.post('/api/player/skip', (req, res) => {
   })
 })
 
+app.post('/api/player/pause', (_req, res) => {
+  setPaused(true)
+
+  return res.json({
+    success: true,
+    state: getState()
+  })
+})
+
+app.post('/api/player/resume', (_req, res) => {
+  setPaused(false)
+
+  return res.json({
+    success: true,
+    state: getState()
+  })
+})
+
 app.get('/api/fallback', (_req, res) => {
   res.json(getFallbackState())
 })
@@ -367,6 +387,11 @@ app.post('/api/fallback/refresh', async (_req, res) => {
   } catch (error) {
     res.status(400).json({ success: false, error: 'не удалось обновить плейлист, проверь ID' })
   }
+})
+
+app.post('/api/fallback/shuffle', (_req, res) => {
+  shuffleFallback()
+  res.json({ success: true, ...getFallbackState() })
 })
 
 app.delete('/api/queue/:index', (req, res) => {
@@ -433,8 +458,8 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   })
 })
 
-app.listen(3000, async () => {
-  log(`Server running on http://localhost:3000`)
+app.listen(PORT, async () => {
+  log(`Server running on http://localhost:${PORT}`)
 
   await refreshFallbackPlaylist()
 
@@ -442,5 +467,5 @@ app.listen(3000, async () => {
     moveToNext()
   }
 
-  open(`http://localhost:3000`).catch(() => {})
+  open(`http://localhost:${PORT}`).catch(() => {})
 })

@@ -522,7 +522,7 @@ async function performSearch(query: string): Promise<Song[]> {
       videoCategoryId: '10',
       videoEmbeddable: 'true',
       videoSyndicated: 'true',
-      maxResults: '10',
+      maxResults: '20',
       order: 'relevance',
       safeSearch: 'moderate'
     })
@@ -607,10 +607,10 @@ export async function fetchPlaylistSongs(playlistId: string): Promise<Song[]> {
   }
 
   const cached = cache.playlists[playlistId]
-  if (cached && cached.expiresAt > Date.now()) {
-    console.log(`[PLAYLIST] Using cached playlist: ${playlistId}`)
-    return cached.songs
-  }
+  // if (cached && cached.expiresAt > Date.now()) {
+  //   console.log(`[PLAYLIST] Using cached playlist: ${playlistId}`)
+  //   return cached.songs
+  // }
 
   const existing = pendingPlaylists.get(playlistId)
   if (existing) {
