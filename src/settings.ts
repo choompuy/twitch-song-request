@@ -1,9 +1,8 @@
-export type Settings = {
-  showVideo: boolean
-}
+import { Settings } from './types.js'
 
 const defaultSettings: Settings = {
-  showVideo: false
+  showVideo: false,
+  position: 'bottom-right'
 }
 
 let currentSettings: Settings = { ...defaultSettings }

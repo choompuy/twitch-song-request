@@ -9,11 +9,21 @@
   <body>
     <div class="container">
       <div class="now-playing-badge" id="nowPlaying">
-        <img class="thumbnail" id="currentThumbnail" alt="" />
-        <div class="text">
-          <div class="title text-md" id="currentTitle"></div>
-          <div class="text-sm text-secondary" id="currentChannel"></div>
-          <div class="text-sm text-green" id="currentRequester"></div>
+        <div class="row">
+          <img class="thumbnail" id="currentThumbnail" alt="" />
+          <div class="text">
+            <div class="title text-md" id="currentTitle"></div>
+            <div class="text-sm text-secondary" id="currentChannel"></div>
+            <div class="text-sm text-green" id="currentRequester"></div>
+          </div>
+        </div>
+        <div class="progress-wrapper">
+          <div class="progress">
+            <div id="progressBar"></div>
+          </div>
+          <div class="time text-sm text-secondary">
+            <div id="elapsedTime">0:00</div>
+          </div>
         </div>
       </div>
 

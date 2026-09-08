@@ -1,55 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFile } from 'node:fs'
 import { join } from 'node:path'
-import { getSecrets } from './secrets.js'
-import { getRuntimeConfig } from './runtimeConfig.js'
-
-type SearchItem = {
-  id?: {
-    videoId?: string
-  }
-  snippet?: {
-    title?: string
-    channelTitle?: string
-    thumbnails?: {
-      medium?: {
-        url?: string
-      }
-    }
-  }
-}
-
-type VideoItem = {
-  id: string
-  snippet?: {
-    title?: string
-    channelTitle?: string
-    thumbnails?: {
-      medium?: {
-        url?: string
-      }
-    }
-    categoryId?: string
-  }
-  contentDetails?: {
-    duration?: string
-  }
-  statistics?: {
-    viewCount?: string
-  }
-  status?: {
-    embeddable?: boolean
-  }
-}
-
-export type Song = {
-  videoId: string
-  title: string
-  channelTitle: string
-  thumbnail: string
-  duration: number
-  views: number
-  url: string
-}
+import { getSecrets } from '../secrets.js'
+import { getRuntimeConfig } from '../runtimeConfig.js'
+import { Song } from '../types.js'
+import { VideoItem, SearchItem } from './types.js'
 
 type SearchCacheEntry = {
   results: Song[]
@@ -64,24 +18,20 @@ type VideoCacheEntry = {
 type CacheFile = {
   searches: Record<string, SearchCacheEntry>
   videos: Record<string, VideoCacheEntry>
-  playlists: Record<string, PlaylistCacheEntry>
   quota: {
     date: string
     searches: number
   }
 }
 
-type PlaylistCacheEntry = {
-  songs: Song[]
-  expiresAt: number
-}
-
 const DATA_DIR = join(process.cwd(), 'cache')
 const CACHE_FILE = join(DATA_DIR, 'youtube-cache.json')
 
-const VIDEO_CACHE_TTL = 10 * 60 * 1000
-const SEARCH_CACHE_TTL = 3600 * 1000 // 1 hour
-const MAX_DAILY_SEARCHES = 80 // Maximum number of searches allowed per day
+const CACHE_LIMITS = {
+  VIDEO_CACHE_TTL: 10 * 60 * 1000,
+  SEARCH_CACHE_TTL: 3600 * 1000, // 1 hour
+  MAX_DAILY_SEARCHES: 80 // Maximum number of searches allowed per day
+}
 
 const pendingSearches = new Map<string, Promise<Song[]>>()
 const pendingVideos = new Map<string, Promise<Song | null>>()
@@ -91,7 +41,6 @@ function createEmptyCache(): CacheFile {
   return {
     searches: {},
     videos: {},
-    playlists: {},
     quota: {
       date: getQuotaDate(),
       searches: 0
@@ -111,11 +60,9 @@ function loadCache(): CacheFile {
 
     const raw = readFileSync(CACHE_FILE, 'utf8')
     const data = JSON.parse(raw) as Partial<CacheFile>
-
     const cache: CacheFile = {
       searches: data.searches ?? {},
       videos: data.videos ?? {},
-      playlists: data.playlists ?? {},
       quota: {
         date: data.quota?.date ?? getQuotaDate(),
         searches: data.quota?.searches ?? 0
@@ -127,15 +74,35 @@ function loadCache(): CacheFile {
         date: getQuotaDate(),
         searches: 0
       }
-
       saveCache(cache)
     }
 
     return cache
   } catch (error) {
     console.error('[CACHE] Failed to load cache:', error instanceof Error ? error.message : error)
-
     return createEmptyCache()
+  }
+}
+
+function sweepCache(): void {
+  const now = Date.now()
+  let hasChanges = false
+  for (const key in cache.searches) {
+    if (cache.searches[key].expiresAt <= now) {
+      delete cache.searches[key]
+      hasChanges = true
+    }
+  }
+
+  for (const key in cache.videos) {
+    if (cache.videos[key].expiresAt <= now) {
+      delete cache.videos[key]
+      hasChanges = true
+    }
+  }
+
+  if (hasChanges) {
+    saveCache(cache)
   }
 }
 
@@ -145,13 +112,20 @@ function saveCache(cache: CacheFile): void {
       mkdirSync(DATA_DIR, { recursive: true })
     }
 
-    writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2), 'utf8')
+    writeFile(CACHE_FILE, JSON.stringify(cache), { encoding: 'utf8' }, () => {})
   } catch (error) {
     console.error('[CACHE] Failed to save cache:', error instanceof Error ? error.message : error)
   }
 }
 
 let cache = loadCache()
+
+setInterval(
+  () => {
+    sweepCache()
+  },
+  60 * 60 * 1000
+)
 
 function getQuotaDate(): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -173,7 +147,6 @@ function resetQuotaIfNeeded(): void {
     date: today,
     searches: 0
   }
-
   saveCache(cache)
 }
 
@@ -185,9 +158,6 @@ function getSearchCache(query: string): Song[] | null {
   }
 
   if (entry.expiresAt <= Date.now()) {
-    delete cache.searches[query]
-    saveCache(cache)
-
     return null
   }
 
@@ -197,7 +167,7 @@ function getSearchCache(query: string): Song[] | null {
 function setSearchCache(query: string, results: Song[]): void {
   cache.searches[query] = {
     results,
-    expiresAt: Date.now() + SEARCH_CACHE_TTL
+    expiresAt: Date.now() + CACHE_LIMITS.SEARCH_CACHE_TTL
   }
 
   saveCache(cache)
@@ -211,9 +181,6 @@ function getVideoCache(videoId: string): Song | null | undefined {
   }
 
   if (entry.expiresAt <= Date.now()) {
-    delete cache.videos[videoId]
-    saveCache(cache)
-
     return undefined
   }
 
@@ -223,26 +190,21 @@ function getVideoCache(videoId: string): Song | null | undefined {
 function setVideoCache(videoId: string, song: Song | null): void {
   cache.videos[videoId] = {
     song,
-    expiresAt: Date.now() + VIDEO_CACHE_TTL
+    expiresAt: Date.now() + CACHE_LIMITS.VIDEO_CACHE_TTL
   }
-
   saveCache(cache)
 }
 
 function canSearch(): boolean {
   resetQuotaIfNeeded()
-
-  return cache.quota.searches < MAX_DAILY_SEARCHES
+  return cache.quota.searches < CACHE_LIMITS.MAX_DAILY_SEARCHES
 }
 
 function consumeSearchQuota(): void {
   resetQuotaIfNeeded()
-
   cache.quota.searches += 1
-
   saveCache(cache)
-
-  console.log(`[QUOTA] Search usage: ${cache.quota.searches}/${MAX_DAILY_SEARCHES}`)
+  console.log(`[QUOTA] Search usage: ${cache.quota.searches}/${CACHE_LIMITS.MAX_DAILY_SEARCHES}`)
 }
 
 function isoDurationToSeconds(value = ''): number {
@@ -281,11 +243,8 @@ function titleScore(title: string, query: string, channelTitle?: string): number
 
   const queryWords = normalizedQuery.split(' ')
   const titleWords = new Set(normalizedTitle.split(' '))
-
   const meaningfulWords = queryWords.filter((word) => word.length >= 2)
-
   const matchedWords = meaningfulWords.filter((word) => titleWords.has(word)).length
-
   let score = matchedWords * 180
 
   for (const word of meaningfulWords) {
@@ -300,7 +259,6 @@ function titleScore(title: string, query: string, channelTitle?: string): number
 
   if (channelTitle) {
     const normalizedChannel = normalize(channelTitle)
-
     const officialKeywords = ['official', 'topic', 'vevo', 'records', 'music', 'audio']
 
     if (officialKeywords.some((keyword) => normalizedChannel.includes(keyword))) {
@@ -337,7 +295,6 @@ function isValidSong(song: Song, video: VideoItem): boolean {
   const isEmbeddable = video.status?.embeddable !== false
   const validDuration = song.duration >= 60 && song.duration <= runtimeConfig.maxDurationSeconds
   const validViews = song.views >= runtimeConfig.minViews
-
   return isMusic && isEmbeddable && validDuration && validViews
 }
 
@@ -361,16 +318,13 @@ async function youtube<T>(path: string, params: Record<string, string>): Promise
   }
 
   const url = new URL(`https://www.googleapis.com/youtube/v3/${path}`)
-
   Object.entries({
     ...params,
     key: youtubeApiKey
   }).forEach(([key, value]) => {
     url.searchParams.set(key, value)
   })
-
   const response = await fetch(url)
-
   const data = (await response.json()) as T & {
     error?: {
       code?: number
@@ -396,7 +350,6 @@ async function youtube<T>(path: string, params: Record<string, string>): Promise
 
 export async function getVideoById(videoId: string): Promise<Song | null> {
   console.log(`[VIDEO] Fetching video by ID: ${videoId}`)
-
   const cached = getVideoCache(videoId)
 
   if (cached !== undefined) {
@@ -412,7 +365,6 @@ export async function getVideoById(videoId: string): Promise<Song | null> {
   }
 
   const request = fetchVideoById(videoId)
-
   pendingVideos.set(videoId, request)
 
   try {
@@ -452,9 +404,7 @@ async function fetchVideoById(videoId: string): Promise<Song | null> {
     }
 
     console.log(`[VIDEO] Valid: "${song.title}" - ${formatViews(song.views)} views`)
-
     setVideoCache(videoId, song)
-
     return song
   } catch (error) {
     console.error('[ERROR] YouTube API:', error instanceof Error ? error.message : error)
@@ -469,7 +419,6 @@ async function fetchVideoById(videoId: string): Promise<Song | null> {
 
 export async function searchSongs(query: string): Promise<Song[]> {
   const normalizedQuery = normalize(query)
-
   console.log(`[SEARCH] Query: "${normalizedQuery}"`)
 
   if (!normalizedQuery) {
@@ -480,13 +429,11 @@ export async function searchSongs(query: string): Promise<Song[]> {
 
   if (cached !== null) {
     console.log(`[CACHE] Search: "${normalizedQuery}" - ${cached.length} results`)
-
     return cached
   }
 
   if (!canSearch()) {
-    console.warn(`[QUOTA] Daily search limit reached: ${MAX_DAILY_SEARCHES}`)
-
+    console.warn(`[QUOTA] Daily search limit reached: ${CACHE_LIMITS.MAX_DAILY_SEARCHES}`)
     throw new Error('дневной лимит поиска YouTube исчерпан, используйте ссылку.')
   }
 
@@ -494,12 +441,10 @@ export async function searchSongs(query: string): Promise<Song[]> {
 
   if (pending) {
     console.log(`[SEARCH] Waiting for existing request: "${normalizedQuery}"`)
-
     return pending
   }
 
   const request = performSearch(normalizedQuery)
-
   pendingSearches.set(normalizedQuery, request)
 
   try {
@@ -528,12 +473,10 @@ async function performSearch(query: string): Promise<Song[]> {
     })
 
     const ids = (search.items ?? []).map((item) => item.id?.videoId).filter((id): id is string => Boolean(id))
-
     console.log(`[SEARCH] Found ${ids.length} candidates`)
 
     if (!ids.length) {
       setSearchCache(query, [])
-
       return []
     }
 
@@ -548,20 +491,14 @@ async function performSearch(query: string): Promise<Song[]> {
 
     for (const video of details.items ?? []) {
       const song = videoToSong(video)
-
       if (!isValidSong(song, video)) continue
-
       songs.push(song)
     }
 
     console.log(`[FILTER] ${songs.length} suitable results`)
-
     songs.sort((a, b) => combinedScore(b, query) - combinedScore(a, query))
-
     setSearchCache(query, songs)
-
     console.log(`[CACHE] Saved "${query}" - ${songs.length} results`)
-
     return songs
   } catch (error) {
     console.error('[ERROR] YouTube search:', error instanceof Error ? error.message : error)
@@ -587,9 +524,7 @@ export function selectBestSong(songs: Song[], query: string): Song | null {
     .sort((a, b) => b.score - a.score)
 
   const selected = ranked[0].song
-
   console.log(`[SELECT] "${selected.title}" - ${formatViews(selected.views)} views`)
-
   return selected
 }
 
@@ -605,12 +540,6 @@ export async function fetchPlaylistSongs(playlistId: string): Promise<Song[]> {
   if (!fallbackPlaylistId) {
     return []
   }
-
-  const cached = cache.playlists[playlistId]
-  // if (cached && cached.expiresAt > Date.now()) {
-  //   console.log(`[PLAYLIST] Using cached playlist: ${playlistId}`)
-  //   return cached.songs
-  // }
 
   const existing = pendingPlaylists.get(playlistId)
   if (existing) {
@@ -658,15 +587,7 @@ export async function fetchPlaylistSongs(playlistId: string): Promise<Song[]> {
         }
       }
 
-      const ttl = 6 * 60 * 60 * 1000 // Cache for 6 hours
-      cache.playlists[playlistId] = {
-        songs,
-        expiresAt: Date.now() + ttl
-      }
-      saveCache(cache)
-
       console.log(`[PLAYLIST] Fetched ${songs.length} songs from playlist: ${playlistId}`)
-
       return songs
     } catch (error) {
       console.error('[ERROR] Playlist fetch:', error instanceof Error ? error.message : error)
@@ -682,3 +603,5 @@ export async function fetchPlaylistSongs(playlistId: string): Promise<Song[]> {
     pendingPlaylists.delete(playlistId)
   }
 }
+
+export { getSearchCache, setSearchCache, getVideoCache, setVideoCache, canSearch, consumeSearchQuota, CACHE_LIMITS }

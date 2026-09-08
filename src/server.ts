@@ -5,7 +5,7 @@ import open from 'open'
 
 import { getPublicSecretsView, updateSecrets } from './secrets.js'
 import { getRuntimeConfig, updateRuntimeConfig } from './runtimeConfig.js'
-import { searchSongs, getVideoById, selectBestSong } from './youtube.js'
+import { searchSongs, getVideoById, selectBestSong } from './youtube/index.js'
 import {
   getState,
   addSong,
@@ -24,23 +24,25 @@ import { getSettings, updateSettings } from './settings.js'
 const app = express()
 const PORT = Number(process.env.PORT) || 3000
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true)
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true)
 
-    try {
-      const url = new URL(origin)
-      const isLocalHost = url.hostname === 'localhost' || url.hostname === '127.0.0.1'
-      const isLan = url.hostname.startsWith('192.168.') || url.hostname.startsWith('10.')
-      const isSamePort = url.port === String(PORT)
+      try {
+        const { hostname } = new URL(origin)
+        const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1'
+        const isLan = /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(hostname)
 
-      if ((isLocalHost || isLan) && isSamePort) return callback(null, true)
-    } catch {
+        if (isLocalHost || isLan) return callback(null, true)
+      } catch {
+        // не валидный origin - падаем в отказ ниже
+      }
+
+      callback(new Error('Not allowed by CORS'))
     }
-
-    callback(new Error('Not allowed by CORS'))
-  }
-}))
+  })
+)
 app.use(express.json())
 app.use(express.static('public'))
 
@@ -49,7 +51,8 @@ function log(message: string) {
 }
 
 /**
- * Извлекает YouTube video ID из ссылки.
+ * Разбирает YouTube-ссылку: определяет, что это вообще YouTube,
+ * и если да - пытается вытащить video ID.
  *
  * Поддерживает:
  * - youtube.com/watch?v=...
@@ -60,13 +63,13 @@ function log(message: string) {
  * - youtube.com/embed/...
  * - youtube.com/v/...
  */
-function getYouTubeVideoId(input: string): string | null {
+function parseYouTubeUrl(input: string): { isYouTube: boolean; videoId: string | null } {
   let url: URL
 
   try {
     url = new URL(input)
   } catch {
-    return null
+    return { isYouTube: false, videoId: null }
   }
 
   const hostname = url.hostname
@@ -74,48 +77,26 @@ function getYouTubeVideoId(input: string): string | null {
     .replace(/^www\./, '')
     .replace(/^m\./, '')
 
+  const isYouTube = hostname === 'youtube.com' || hostname === 'youtube-nocookie.com' || hostname === 'youtu.be'
+
+  if (!isYouTube) return { isYouTube: false, videoId: null }
+
   if (hostname === 'youtu.be') {
     const id = url.pathname.split('/').filter(Boolean)[0]
-
-    return isValidVideoId(id) ? id : null
-  }
-
-  if (hostname !== 'youtube.com' && hostname !== 'youtube-nocookie.com') {
-    return null
+    return { isYouTube: true, videoId: isValidVideoId(id) ? id : null }
   }
 
   if (url.pathname === '/watch') {
     const id = url.searchParams.get('v')
-
-    return isValidVideoId(id) ? id : null
+    return { isYouTube: true, videoId: isValidVideoId(id) ? id : null }
   }
 
   const pathMatch = url.pathname.match(/^\/(?:shorts|embed|v)\/([a-zA-Z0-9_-]{11})/)
-
-  if (pathMatch) {
-    return pathMatch[1]
-  }
-
-  return null
+  return { isYouTube: true, videoId: pathMatch ? pathMatch[1] : null }
 }
 
 function isValidVideoId(value: string | null | undefined): value is string {
   return Boolean(value && /^[a-zA-Z0-9_-]{11}$/.test(value))
-}
-
-function isYouTubeUrl(input: string): boolean {
-  try {
-    const url = new URL(input)
-
-    const hostname = url.hostname
-      .toLowerCase()
-      .replace(/^www\./, '')
-      .replace(/^m\./, '')
-
-    return hostname === 'youtube.com' || hostname === 'youtube-nocookie.com' || hostname === 'youtu.be'
-  } catch {
-    return false
-  }
 }
 
 function getErrorInfo(error: unknown): {
@@ -124,42 +105,15 @@ function getErrorInfo(error: unknown): {
   message: string
 } {
   const message = error instanceof Error ? error.message : 'не удалось добавить трек'
-
   const errorTable = [
-    {
-      test: (m: string) => m.includes('already playing') || m.includes('already in the queue') || m.includes('уже находится'),
-      code: 'DUPLICATE',
-      status: 409
-    },
-    {
-      test: (m: string) => m.includes('queue is full') || m.includes('очередь заполнена'),
-      code: 'QUEUE_FULL',
-      status: 409
-    },
-    {
-      test: (m: string) => m.includes('active requests') || m.includes('вы можете заказать'),
-      code: 'USER_LIMIT',
-      status: 409
-    },
-    {
-      test: (m: string) => m.includes('cooldown') || m.includes('слишком часто'),
-      code: 'COOLDOWN',
-      status: 409
-    },
-    {
-      test: (m: string) => m.includes('YouTube API quota') || m.includes('лимит YouTube API'),
-      code: 'YOUTUBE_QUOTA',
-      status: 503
-    },
-    {
-      test: (m: string) => m.includes('YouTube'),
-      code: 'YOUTUBE_ERROR',
-      status: 503
-    }
+    { test: (m: string) => m.includes('уже находится'), code: 'DUPLICATE', status: 409 },
+    { test: (m: string) => m.includes('очередь заполнена'), code: 'QUEUE_FULL', status: 409 },
+    { test: (m: string) => m.includes('вы можете заказать'), code: 'USER_LIMIT', status: 409 },
+    { test: (m: string) => m.includes('слишком часто'), code: 'COOLDOWN', status: 409 },
+    { test: (m: string) => m.includes('лимит YouTube API'), code: 'YOUTUBE_QUOTA', status: 503 },
+    { test: (m: string) => m.includes('YouTube'), code: 'YOUTUBE_ERROR', status: 503 }
   ]
-
   const matched = errorTable.find((entry) => entry.test(message))
-
   return {
     code: matched?.code ?? 'SERVER_ERROR',
     status: matched?.status ?? 500,
@@ -184,7 +138,6 @@ app.get('/api/settings', (_req, res) => {
 app.put('/api/settings', (req, res) => {
   const updates = req.body ?? {}
   const updated = updateSettings(updates)
-
   res.json(updated)
 })
 
@@ -201,7 +154,6 @@ app.put('/api/config', async (req, res) => {
       await refreshFallbackPlaylist()
     } catch (error) {
       log(`[ERROR] Failed to refresh fallback playlist: ${error instanceof Error ? error.message : error}`)
-
       return res.json({
         ...updated,
         fallbackPlaylistWarning: 'не удалось загрузить плейлист, проверьте ID'
@@ -225,16 +177,13 @@ app.get('/api/search', async (req, res) => {
 
   try {
     const songs = await searchSongs(query)
-
     return res.json({
       success: true,
       results: songs
     })
   } catch (error) {
     log(`[ERROR] Search: ${error instanceof Error ? error.message : error}`)
-
     const info = getErrorInfo(error)
-
     return res.status(info.status).json({
       success: false,
       error: info.message,
@@ -268,21 +217,10 @@ app.post('/api/queue/request', async (req, res) => {
 
   try {
     let song = null
-    const videoId = getYouTubeVideoId(trimmedQuery)
+    const { isYouTube, videoId } = parseYouTubeUrl(trimmedQuery)
 
-    if (videoId) {
-      log(`[REQUEST] ${trimmedRequestedBy} → YouTube URL: ${videoId}`)
-
-      song = await getVideoById(videoId)
-    } else if (!isYouTubeUrl(trimmedQuery)) {
-      log(`[REQUEST] ${trimmedRequestedBy} → Search: "${trimmedQuery}"`)
-
-      const songs = await searchSongs(trimmedQuery)
-
-      song = selectBestSong(songs, trimmedQuery)
-    } else {
+    if (isYouTube && !videoId) {
       log(`[REJECT] ${trimmedRequestedBy} → INVALID_YOUTUBE_URL`)
-
       return res.status(400).json({
         success: false,
         error: 'некорректная ссылка на YouTube',
@@ -290,9 +228,17 @@ app.post('/api/queue/request', async (req, res) => {
       })
     }
 
+    if (videoId) {
+      log(`[REQUEST] ${trimmedRequestedBy} → YouTube URL: ${videoId}`)
+      song = await getVideoById(videoId)
+    } else {
+      log(`[REQUEST] ${trimmedRequestedBy} → Search: "${trimmedQuery}"`)
+      const songs = await searchSongs(trimmedQuery)
+      song = selectBestSong(songs, trimmedQuery)
+    }
+
     if (!song) {
       log(`[REJECT] ${trimmedRequestedBy} → SONG_NOT_FOUND`)
-
       return res.status(404).json({
         success: false,
         error: 'не удалось найти подходящий трек',
@@ -302,26 +248,20 @@ app.post('/api/queue/request', async (req, res) => {
 
     const stateBefore = getState()
     const wasEmpty = stateBefore.current === null
-
     const item = addSong(song, trimmedRequestedBy, !wasEmpty)
 
     if (wasEmpty) {
       setCurrent(item)
-
       log(`[ACCEPT] ${trimmedRequestedBy} → "${song.title}" - now playing`)
     } else {
       log(`[ACCEPT] ${trimmedRequestedBy} → "${song.title}" - queued`)
     }
 
     const state = getState()
-
     const position = wasEmpty ? 0 : state.queue.length
-
     return res.status(201).json({
       success: true,
-
       message: wasEmpty ? `добавлено: ${song.title} - сейчас играет` : `добавлено: ${song.title} - позиция #${position}`,
-
       song: item,
       started: wasEmpty,
       position,
@@ -329,9 +269,7 @@ app.post('/api/queue/request', async (req, res) => {
     })
   } catch (error) {
     const info = getErrorInfo(error)
-
     log(`[REJECT] ${trimmedRequestedBy} → ${info.code}: ${info.message}`)
-
     return res.status(info.status).json({
       success: false,
       error: info.message,
@@ -342,7 +280,6 @@ app.post('/api/queue/request', async (req, res) => {
 
 app.post('/api/player/ended', (_req, res) => {
   moveToNext()
-
   return res.json({
     success: true,
     state: getState()
@@ -351,7 +288,6 @@ app.post('/api/player/ended', (_req, res) => {
 
 app.post('/api/player/skip', (req, res) => {
   skipCurrent()
-
   return res.json({
     success: true,
     state: getState()
@@ -360,7 +296,6 @@ app.post('/api/player/skip', (req, res) => {
 
 app.post('/api/player/pause', (_req, res) => {
   setPaused(true)
-
   return res.json({
     success: true,
     state: getState()
@@ -369,7 +304,6 @@ app.post('/api/player/pause', (_req, res) => {
 
 app.post('/api/player/resume', (_req, res) => {
   setPaused(false)
-
   return res.json({
     success: true,
     state: getState()
@@ -384,7 +318,7 @@ app.post('/api/fallback/refresh', async (_req, res) => {
   try {
     await refreshFallbackPlaylist()
     res.json({ success: true, ...getFallbackState() })
-  } catch (error) {
+  } catch {
     res.status(400).json({ success: false, error: 'не удалось обновить плейлист, проверь ID' })
   }
 })
@@ -422,9 +356,8 @@ app.delete('/api/queue/:index', (req, res) => {
   })
 })
 
-app.post('/api/queue/clear', (req, res) => {
+app.post('/api/queue/clear', (_req, res) => {
   clearQueue()
-
   return res.json({
     success: true,
     state: getState()
@@ -450,7 +383,6 @@ app.use('/api', (_req, res) => {
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   log(`[ERROR] ${err.message}`)
-
   return res.status(500).json({
     success: false,
     error: 'внутренняя ошибка сервера',
@@ -460,12 +392,9 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 app.listen(PORT, async () => {
   log(`Server running on http://localhost:${PORT}`)
-
   await refreshFallbackPlaylist()
-
   if (!getState().current) {
     moveToNext()
   }
-
   open(`http://localhost:${PORT}`).catch(() => {})
 })

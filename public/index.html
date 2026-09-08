@@ -38,7 +38,7 @@
             <h2>Add Song</h2>
             <div class="row">
               <input class="input" type="text" id="searchInput" placeholder="YouTube URL or song name..." />
-              <button class="btn" onclick="search()">Search</button>
+              <button id="searchBtn" class="btn" onclick="search()">Search</button>
             </div>
             <div class="panel-content">
               <div class="row-list hidden" id="searchResults"></div>
@@ -53,7 +53,7 @@
                 <span class="text-sm text-secondary" id="queueCount">0</span>
               </div>
               <div>
-                <button class="btn btn-danger" onclick="clearQueue()">Clear Queue</button>
+                <button id="clearQueueBtn" class="btn btn-danger" onclick="clearQueue()">Clear Queue</button>
               </div>
             </div>
             <div class="panel-content">
@@ -108,19 +108,9 @@
             <div class="preview-url">OBS URL: <a href="/preview" target="_blank">/preview</a></div>
 
             <div class="row">
-              <button class="btn btn-icon" onclick="pauseCurrent()">
+              <button id="playPauseBtn" class="btn btn-icon" onclick="playPauseCurrent()">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
                   <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5v14m8-14v14" />
-                </svg>
-              </button>
-              <button class="btn btn-icon" onclick="resumeCurrent()">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
-                  <path
-                    stroke="currentColor"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M16.658 9.286c1.44.9 2.16 1.35 2.407 1.926a2 2 0 0 1 0 1.576c-.247.576-.967 1.026-2.407 1.926L9.896 18.94c-1.598.999-2.397 1.498-3.056 1.445a2 2 0 0 1-1.446-.801C5 19.053 5 18.111 5 16.226V7.774c0-1.885 0-2.827.394-3.358a2 2 0 0 1 1.446-.801c.66-.053 1.458.446 3.056 1.445z"
-                  />
                 </svg>
               </button>
               <button class="btn btn-icon" onclick="skipCurrent()">
@@ -173,14 +163,15 @@
                 <input class="input" type="text" id="cfgFallbackPlaylist" placeholder="Playlist..." />
               </label>
             </div>
-            <button class="btn" onclick="saveConfig()">Save settings</button>
-            <button class="btn" onclick="saveSecrets()">Save keys</button>
+            <button id="saveConfigBtn" class="btn" onclick="saveConfig()">Save settings</button>
+            <button id="saveSecretsBtn" class="btn" onclick="saveSecrets()">Save keys</button>
           </div>
         </div>
       </div>
     </div>
 
     <script src="https://www.youtube.com/iframe_api"></script>
+    <script src="js/icons.js"></script>
     <script src="js/shared.js"></script>
     <script src="js/app.js"></script>
   </body>

@@ -1,14 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-
-export type RuntimeConfig = {
-  minViews: number
-  maxDurationSeconds: number
-  maxQueueSize: number
-  maxRequestsPerUser: number
-  cooldownSeconds: number
-  fallbackPlaylistId: string
-}
+import { RuntimeConfig } from './types.js'
 
 const CONFIG_PATH = path.join('data', 'runtime-config.json')
 

@@ -1,3 +1,5 @@
+const $ = (id) => document.getElementById(id)
+
 function escapeHtml(value) {
   return String(value).replace(
     /[&<>"']/g,

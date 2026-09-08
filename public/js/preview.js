@@ -6,6 +6,16 @@ let settings = {}
 
 const log = createLogger('PREVIEW')
 
+const dom = {
+  playerWrapper: $('playerWrapper'),
+  currentThumbnail: $('currentThumbnail'),
+  currentTitle: $('currentTitle'),
+  currentChannel: $('currentChannel'),
+  currentRequester: $('currentRequester'),
+  progressBar: $('progressBar'),
+  elapsedTime: $('elapsedTime')
+}
+
 async function fetchSettings() {
   try {
     const response = await fetch('/api/settings')
@@ -16,27 +26,23 @@ async function fetchSettings() {
 }
 
 function updateMediaVisibility(state) {
-  const playerWrapper = document.getElementById('playerWrapper')
-  const thumbnail = document.querySelector('.now-playing-badge .thumbnail')
-
-  playerWrapper.classList.toggle('hidden', !settings.showVideo)
-  thumbnail.classList.toggle('hidden', settings.showVideo)
+  dom.playerWrapper.classList.toggle('hidden', !settings.showVideo)
+  dom.currentThumbnail.classList.toggle('hidden', settings.showVideo)
 }
 
 function renderCurrent(state) {
-  const badge = document.querySelector('.now-playing-badge')
+  const badge = $('nowPlaying')
 
   if (!state.current) {
     badge.classList.remove('visible')
     return
   }
 
-  console.log(state);
-
-  document.querySelector('#currentThumbnail').src = state.current.thumbnail
-  document.querySelector('#currentTitle').textContent = state.current.title
-  document.querySelector('#currentChannel').textContent = state.current.channelTitle
-  document.querySelector('#currentRequester').textContent = `@${state.current.requestedBy}`
+  badge.dataset.position = settings.position
+  currentThumbnail.src = state.current.thumbnail
+  dom.currentTitle.textContent = state.current.title
+  dom.currentChannel.textContent = state.current.channelTitle
+  dom.currentRequester.textContent = `@${state.current.requestedBy}`
 
   badge.classList.add('visible')
 }
@@ -69,6 +75,21 @@ function renderState(state) {
   } else if (isPlayerReady && !state.current && !isTransitioning) {
     player.stopVideo()
   }
+}
+
+function updateProgress() {
+  if (!player || !currentState?.current) {
+    dom.progressBar.style.width = '0%'
+    dom.elapsedTime.textContent = formatDuration(0)
+    return
+  }
+
+  const currentTime = player.getCurrentTime() || 0
+  const duration = currentState.current.duration
+  const progress = ((currentTime / duration) * 100).toFixed(2)
+
+  dom.progressBar.style.width = `${progress}%`
+  dom.elapsedTime.textContent = `${formatDuration(Math.floor(currentTime))} / ${formatDuration(duration)}`
 }
 
 async function fetchState() {
@@ -116,11 +137,14 @@ function onPlayerError(event) {
 
   if (!isTransitioning) {
     isTransitioning = true
-    notifyEnded().finally(() => {
-      setTimeout(() => {
-        isTransitioning = false
-      }, 1000)
-    })
+
+    fetch('/api/player/skip', { method: 'POST' })
+      .then(() => fetchState())
+      .finally(() => {
+        setTimeout(() => {
+          isTransitioning = false
+        }, 1000)
+      })
   }
 }
 
@@ -149,7 +173,8 @@ window.onYouTubeIframeAPIReady = () => {
 setInterval(() => {
   fetchSettings()
   fetchState()
-}, 2000)
+  updateProgress()
+}, 1000)
 
 const tag = document.createElement('script')
 tag.src = 'https://www.youtube.com/iframe_api'

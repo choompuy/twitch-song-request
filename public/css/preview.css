@@ -27,17 +27,38 @@ body {
 .now-playing-badge {
   position: absolute;
   display: none;
+  flex-direction: column;
   align-items: center;
   margin: 1rem;
   padding: 0.5rem 0.75rem;
   gap: 0.5rem;
-  background: var(--bg-elevated);
+  background: var(--bg-panel);
   border-radius: var(--radius-sm);
   z-index: 10;
 }
 
+.now-playing-badge[data-position='top-left'] {
+  top: 1rem;
+  left: 1rem;
+}
+
+.now-playing-badge[data-position='top-right'] {
+  top: 1rem;
+  right: 1rem;
+}
+
+.now-playing-badge[data-position='bottom-left'] {
+  bottom: 1rem;
+  left: 1rem;
+}
+
+.now-playing-badge[data-position='bottom-right'] {
+  bottom: 1rem;
+  right: 1rem;
+}
+
 .now-playing-badge.visible {
-  display: inline-flex;
+  display: flex;
 }
 
 .now-playing-badge .thumbnail {
@@ -58,13 +79,25 @@ body {
   text-overflow: ellipsis;
 }
 
-.player-wrapper {
-  position: fixed;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
+.progress-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: end;
+  width: 100%;
+}
+
+.progress {
+  width: 100%;
+  height: 0.5rem;
+  border-radius: 0.5rem;
+  background-color: var(--bg-elevated);
   overflow: hidden;
+}
+
+.progress #progressBar {
+  width: 0;
+  height: 100%;
+  background-color: var(--accent-blue);
 }
 
 .player-wrapper {

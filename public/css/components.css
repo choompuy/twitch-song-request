@@ -38,6 +38,19 @@
   flex: 1;
 }
 
+.row {
+  display: flex;
+  align-items: center;
+  flex-direction: row;
+  gap: 0.5rem;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .panel {
   background: var(--bg-panel);
   border-radius: var(--radius-md);
@@ -118,13 +131,6 @@
   border-radius: var(--radius-sm);
   aspect-ratio: 16 / 9;
   object-fit: cover;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  flex-direction: row;
-  gap: 0.5rem;
 }
 
 .row-list {
