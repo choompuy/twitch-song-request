@@ -12,9 +12,7 @@ export type FallbackPlaylist = {
   enabled: boolean
   shuffle: boolean
   repeat: boolean
-  playedBehavior: FallbackPlayedBehavior
 }
-export type FallbackPlayedBehavior = 'requeue' | 'remove'
 
 export type Settings = {
   showVideo: boolean
@@ -76,7 +74,7 @@ export class AppError extends Error {
   }
 }
 
-export type StateResponse = PlayerState
+export type StateResponse = PlayerState & { nextTrack: NextTrackView | null }
 export type SettingsResponse = Settings
 export type PreviewStateResponse = { state: PlayerState; settings: Settings }
 export type ConfigResponse = Config & { fallbackPlaylistWarning?: string }
@@ -88,11 +86,23 @@ export type QueueRequestResponse = {
   position: number
   state: PlayerState
 }
-export type FallbackTrackView = Pick<Song, 'videoId' | 'title' | 'channelTitle' | 'thumbnail' | 'duration'>
+export type FallbackTrackView = Pick<Song, 'videoId' | 'title' | 'channelTitle' | 'thumbnail' | 'duration'> & {
+  isPlayed: boolean
+}
 export type FallbackStateResponse = FallbackPlaylist & {
   lastRefreshedAt: number | null
   upNext: FallbackTrackView[]
   sourceCount: number
+  activeVideoId: string | null
+}
+export type NextTrackView = {
+  source: 'queue' | 'fallback'
+  videoId: string
+  title: string
+  channelTitle: string
+  thumbnail: string
+  requestedBy: string | null
+  duration: number
 }
 export type QueueRemoveResponse = { removed: QueueItem; state: PlayerState }
 export type SecretsResponse = { youtubeApiKey: string; hasYoutubeApiKey: boolean }

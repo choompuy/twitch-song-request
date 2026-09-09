@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { getConfig, updateConfig } from './config.js'
 import { getSettings, setSettings } from './settings.js'
 import { fetchPlaylistSongs } from './youtube/index.js'
-import { Settings, QueueItem, Song, PlayerState, FallbackStateResponse } from './types.js'
+import { Settings, QueueItem, Song, PlayerState, FallbackStateResponse, FallbackTrackView, NextTrackView } from './types.js'
 
 type StateFile = {
   current: QueueItem | null
@@ -26,7 +26,8 @@ const queueVideoIds = new Set<string>()
 let isPaused = false
 
 let fallbackSourceTracks: Song[] = []
-let fallbackPlayQueue: Song[] = []
+let fallbackOrder: string[] = []
+let fallbackCursor = -1
 let loadedFallbackPlaylistId: string | null = null
 let lastFallbackRefreshAt: number | null = null
 
@@ -125,9 +126,27 @@ function shuffle<T>(items: T[]): T[] {
   return array
 }
 
-function buildPlayQueue(tracks: Song[]): Song[] {
-  const config = getConfig()
-  return config.fallbackPlaylist.shuffle ? shuffle(tracks) : [...tracks]
+function buildOrder(tracks: Song[], shuffleOn: boolean, currentVideoId: string | null): string[] {
+  const ids = tracks.map((track) => track.videoId)
+
+  if (!shuffleOn) {
+    return ids
+  }
+
+  if (!currentVideoId || !ids.includes(currentVideoId)) {
+    return shuffle(ids)
+  }
+
+  const rest = ids.filter((id) => id !== currentVideoId)
+  return [currentVideoId, ...shuffle(rest)]
+}
+
+function findTrack(videoId: string): Song | undefined {
+  return fallbackSourceTracks.find((track) => track.videoId === videoId)
+}
+
+function activeFallbackVideoId(): string | null {
+  return fallbackOrder[fallbackCursor] ?? null
 }
 
 export async function refreshFallback(): Promise<FallbackStateResponse> {
@@ -135,7 +154,8 @@ export async function refreshFallback(): Promise<FallbackStateResponse> {
 
   if (!playlistId) {
     fallbackSourceTracks = []
-    fallbackPlayQueue = []
+    fallbackOrder = []
+    fallbackCursor = -1
     loadedFallbackPlaylistId = null
     lastFallbackRefreshAt = null
     return getFallbackState()
@@ -143,24 +163,33 @@ export async function refreshFallback(): Promise<FallbackStateResponse> {
 
   const newTracks = await fetchPlaylistSongs(playlistId)
   const isFirstLoad = loadedFallbackPlaylistId !== playlistId
+  const config = getConfig()
+  const activeId = activeFallbackVideoId()
 
   if (isFirstLoad) {
     fallbackSourceTracks = newTracks
-    fallbackPlayQueue = buildPlayQueue(newTracks)
+    fallbackOrder = buildOrder(newTracks, config.fallbackPlaylist.shuffle, null)
+    fallbackCursor = -1
   } else {
     const newIds = new Set(newTracks.map((track) => track.videoId))
     const oldIds = new Set(fallbackSourceTracks.map((track) => track.videoId))
 
-    const addedTracks = newTracks.filter((track) => !oldIds.has(track.videoId))
+    const addedIds = newTracks.map((track) => track.videoId).filter((id) => !oldIds.has(id))
     const removedCount = fallbackSourceTracks.filter((track) => !newIds.has(track.videoId)).length
 
     fallbackSourceTracks = newTracks
-    fallbackPlayQueue = fallbackPlayQueue.filter((track) => newIds.has(track.videoId))
 
-    const toAppend = getConfig().fallbackPlaylist.shuffle ? shuffle(addedTracks) : addedTracks
-    fallbackPlayQueue.push(...toAppend)
+    const activeIndexBefore = activeId ? fallbackOrder.indexOf(activeId) : -1
+    fallbackOrder = fallbackOrder.filter((id) => newIds.has(id))
+    fallbackOrder.push(...(config.fallbackPlaylist.shuffle ? shuffle(addedIds) : addedIds))
 
-    log(`[FALLBACK] Refreshed: +${addedTracks.length} added, -${removedCount} removed, ${fallbackPlayQueue.length} in rotation`)
+    if (activeId && newIds.has(activeId)) {
+      fallbackCursor = fallbackOrder.indexOf(activeId)
+    } else if (activeIndexBefore >= 0) {
+      fallbackCursor = Math.min(activeIndexBefore, Math.max(fallbackOrder.length - 1, 0))
+    }
+
+    log(`[FALLBACK] Refreshed: +${addedIds.length} added, -${removedCount} removed, ${fallbackOrder.length} in rotation`)
   }
 
   loadedFallbackPlaylistId = playlistId
@@ -172,16 +201,30 @@ export async function refreshFallback(): Promise<FallbackStateResponse> {
 
 export function toggleFallbackShuffle(): FallbackStateResponse {
   const config = getConfig()
-  config.fallbackPlaylist.shuffle = !config.fallbackPlaylist.shuffle
-  fallbackPlayQueue = buildPlayQueue(fallbackSourceTracks)
-  log(`[FALLBACK] Shuffle: ${config.fallbackPlaylist.shuffle}`)
+  const shuffleOn = !config.fallbackPlaylist.shuffle
+  updateConfig({ fallbackPlaylist: { ...config.fallbackPlaylist, shuffle: shuffleOn } })
+
+  const activeId = currentSong?.isFallback ? currentSong.videoId : activeFallbackVideoId()
+  fallbackOrder = buildOrder(fallbackSourceTracks, shuffleOn, activeId)
+  fallbackCursor = activeId ? fallbackOrder.indexOf(activeId) : -1
+
+  log(`[FALLBACK] Shuffle: ${shuffleOn}`)
   return getFallbackState()
 }
 
 export function toggleFallbackRepeat(): FallbackStateResponse {
   const config = getConfig()
-  config.fallbackPlaylist.repeat = !config.fallbackPlaylist.repeat
-  log(`[FALLBACK] Repeat: ${config.fallbackPlaylist.repeat}`)
+  const repeat = !config.fallbackPlaylist.repeat
+  updateConfig({ fallbackPlaylist: { ...config.fallbackPlaylist, repeat } })
+  log(`[FALLBACK] Repeat: ${repeat}`)
+  return getFallbackState()
+}
+
+export function toggleFallbackEnabled(): FallbackStateResponse {
+  const config = getConfig()
+  const enabled = !config.fallbackPlaylist.enabled
+  updateConfig({ fallbackPlaylist: { ...config.fallbackPlaylist, enabled } })
+  log(`[FALLBACK] Enabled: ${enabled}`)
   return getFallbackState()
 }
 
@@ -194,15 +237,66 @@ export function getFallbackState(): FallbackStateResponse {
     enabled: config.fallbackPlaylist.enabled,
     shuffle: config.fallbackPlaylist.shuffle,
     repeat: config.fallbackPlaylist.repeat,
-    playedBehavior: config.fallbackPlaylist.playedBehavior,
     sourceCount: fallbackSourceTracks.length,
-    upNext: fallbackPlayQueue.slice(0, 10).map((track) => ({
-      videoId: track.videoId,
-      title: track.title,
-      channelTitle: track.channelTitle,
-      thumbnail: track.thumbnail,
-      duration: track.duration
-    }))
+    activeVideoId: currentSong?.isFallback ? currentSong.videoId : null,
+    upNext: fallbackOrder
+      .map((videoId, index) => {
+        const track = findTrack(videoId)
+        if (!track) return null
+        return { ...pickTrackView(track), isPlayed: index < fallbackCursor }
+      })
+      .filter((track): track is FallbackTrackView => track !== null)
+  }
+}
+
+function pickTrackView(track: Song): Pick<Song, 'videoId' | 'title' | 'channelTitle' | 'thumbnail' | 'duration'> {
+  return {
+    videoId: track.videoId,
+    title: track.title,
+    channelTitle: track.channelTitle,
+    thumbnail: track.thumbnail,
+    duration: track.duration
+  }
+}
+
+export function getNextTrack(): NextTrackView | null {
+  const queued = queue[0]
+
+  if (queued) {
+    return {
+      source: 'queue',
+      videoId: queued.videoId,
+      title: queued.title,
+      channelTitle: queued.channelTitle,
+      thumbnail: queued.thumbnail,
+      requestedBy: queued.requestedBy,
+      duration: queued.duration
+    }
+  }
+
+  const config = getConfig()
+
+  if (!config.fallbackPlaylist.enabled || !fallbackOrder.length) {
+    return null
+  }
+
+  const nextIndex = fallbackCursor + 1
+  const nextId = nextIndex < fallbackOrder.length ? fallbackOrder[nextIndex] : config.fallbackPlaylist.repeat ? fallbackOrder[0] : null
+
+  const upcoming = nextId ? findTrack(nextId) : undefined
+
+  if (!upcoming) {
+    return null
+  }
+
+  return {
+    source: 'fallback',
+    videoId: upcoming.videoId,
+    title: upcoming.title,
+    channelTitle: upcoming.channelTitle,
+    thumbnail: upcoming.thumbnail,
+    requestedBy: null,
+    duration: upcoming.duration
   }
 }
 
@@ -214,40 +308,31 @@ function toFallbackQueueItem(song: Song): QueueItem {
     isFallback: true
   }
 }
-
 function nextFallbackTrack(): QueueItem | null {
   const config = getConfig()
-
-  if (!config.fallbackPlaylist.enabled) {
+  if (!config.fallbackPlaylist.enabled || !fallbackOrder.length) {
     return null
   }
 
-  if (!fallbackPlayQueue.length) {
-    if (config.fallbackPlaylist.repeat && fallbackSourceTracks.length > 0) {
-      fallbackPlayQueue = buildPlayQueue(fallbackSourceTracks)
-    } else {
+  const nextIndex = fallbackCursor + 1
+
+  if (nextIndex >= fallbackOrder.length) {
+    if (!config.fallbackPlaylist.repeat) {
+      fallbackCursor = fallbackOrder.length + 1
       return null
     }
+    fallbackCursor = 0
+  } else {
+    fallbackCursor = nextIndex
   }
 
-  const song = fallbackPlayQueue.shift()
+  const song = findTrack(fallbackOrder[fallbackCursor])
 
   if (!song) {
     return null
   }
 
-  if (config.fallbackPlaylist.playedBehavior === 'requeue') {
-    fallbackPlayQueue.push(song)
-  }
-
   return toFallbackQueueItem(song)
-}
-
-export function toggleFallbackEnabled(): FallbackStateResponse {
-  const config = getConfig()
-  config.fallbackPlaylist.enabled = !config.fallbackPlaylist.enabled
-  updateConfig(config)
-  return getFallbackState()
 }
 
 function getUserActiveCount(username: string): number {
@@ -255,11 +340,12 @@ function getUserActiveCount(username: string): number {
   return queue.filter((item) => item.requestedBy.toLowerCase() === normalized).length
 }
 
-export function getState(): PlayerState {
+export function getState(): PlayerState & { nextTrack: NextTrackView | null } {
   return {
     current: currentSong,
     queue: [...queue],
-    isPaused
+    isPaused,
+    nextTrack: getNextTrack()
   }
 }
 

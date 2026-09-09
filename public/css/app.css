@@ -81,14 +81,22 @@ body {
   overflow: hidden;
 }
 
-.song-info .meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
+.next-song-wrapper h3 {
+  font-weight: 500;
 }
 
-.song-info .requester {
-  color: var(--accent-green);
+.next-song {
+  display: inline-flex;
+  padding: 0.25rem 1rem 0.25rem 0.25rem;
+  gap: 0.5rem;
+  border-radius: var(--radius-md);
+  border: 1px var(--bg-elevated);
+  border-style: dashed;
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+.next-song:hover {
+  opacity: 1;
 }
 
 .queue-header {

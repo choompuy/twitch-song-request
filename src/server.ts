@@ -151,8 +151,11 @@ app.get('/api/config', (_req, res) => {
 app.put('/api/config', async (req, res) => {
   const body = { ...(req.body ?? {}) }
 
-  if (typeof body.fallbackPlaylist.playlistId === 'string') {
-    body.fallbackPlaylist.playlistId = parsePlaylistId(body.fallbackPlaylist.playlistId) ?? ''
+  if (body.fallbackPlaylist && typeof body.fallbackPlaylist.playlistId === 'string') {
+    body.fallbackPlaylist = {
+      ...body.fallbackPlaylist,
+      playlistId: parsePlaylistId(body.fallbackPlaylist.playlistId) || null
+    }
   }
 
   const previous = getConfig()

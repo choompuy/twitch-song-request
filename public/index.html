@@ -23,15 +23,30 @@
                 <div class="details">
                   <div class="title text-lg" id="currentTitle"></div>
                   <div class="channel text-md text-secondary" id="currentChannel"></div>
-                  <div class="meta text-sm text-muted">
+                  <div class="row text-sm text-muted">
                     <span id="currentViews"></span>
                     <span id="currentDuration"></span>
-                    <span class="requester" id="currentRequester"></span>
+                    <span class="requester text-green" id="currentRequester"></span>
                   </div>
                 </div>
               </div>
             </div>
             <div class="empty" id="noPlaying">Nothing playing</div>
+
+            <div id="nextPlaying" class="next-song-wrapper column">
+              <h3 class="text-md text-secondary">Next Playing</h3>
+              <div class="next-song">
+                <img class="thumbnail-img" id="nextThumbnail" alt="" />
+                <div class="details">
+                  <div class="title text-md" id="nextTitle"></div>
+                  <div class="channel text-sm text-secondary" id="nextChannel"></div>
+                  <div class="row text-xs text-muted">
+                    <span id="nextDuration"></span>
+                    <span class="requester text-green" id="nextRequester"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="panel">
@@ -57,7 +72,7 @@
               </div>
             </div>
             <div class="panel-content">
-              <div class="row-list" id="queueList"></div>
+              <div class="row-list" id="queueList"><div class="empty">Queue is empty</div></div>
             </div>
           </div>
 
@@ -102,7 +117,9 @@
                   </svg>
                 </button>
                 <label class="switch" title="Enable playlist">
-                  <input type="checkbox" id="fallbackEnabledToggle" onchange="toggleFallbackEnabled()" />
+                  <div class="checkbox-wrapper">
+                    <input class="checkbox" type="checkbox" id="fallbackEnabledToggle" onchange="toggleFallbackEnabled()" />
+                  </div>
                   <span class="switch-track"></span>
                 </label>
               </div>
@@ -117,7 +134,9 @@
           <div class="panel">
             <h2>Preview Settings</h2>
             <label class="row">
-              <input type="checkbox" id="showVideo" onchange="savePreviewSettings()" />
+              <div class="checkbox-wrapper">
+                <input class="checkbox" type="checkbox" id="showVideo" onchange="savePreviewSettings()" />
+              </div>
               Показать видео
             </label>
             <div class="preview-url">OBS URL: <a href="/preview" target="_blank">/preview</a></div>

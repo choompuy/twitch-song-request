@@ -18,15 +18,18 @@ const envDefaults: Config = {
     playlistId: null,
     enabled: true,
     shuffle: false,
-    repeat: false,
-    playedBehavior: 'requeue'
+    repeat: false
   }
 }
 
 function loadFromDisk(): Config | null {
   try {
     const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')) as Partial<Config>
-    return { ...envDefaults, ...raw }
+    return {
+      ...envDefaults,
+      ...raw,
+      fallbackPlaylist: { ...envDefaults.fallbackPlaylist, ...raw.fallbackPlaylist }
+    }
   } catch {
     return null
   }
@@ -72,7 +75,11 @@ export function getConfig(): Config {
 }
 
 export function updateConfig(updates: Partial<Config>): Config {
-  config = { ...config, ...updates }
+  config = {
+    ...config,
+    ...updates,
+    fallbackPlaylist: { ...config.fallbackPlaylist, ...updates.fallbackPlaylist }
+  }
   scheduleSave()
   return { ...config }
 }

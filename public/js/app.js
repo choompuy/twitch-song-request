@@ -7,6 +7,7 @@ const state = {
   current: null,
   queue: [],
   isPaused: false,
+  nextTrack: null,
   settings: {
     showVideo: true
   },
@@ -35,6 +36,13 @@ const dom = {
   currentViews: $('currentViews'),
   currentDuration: $('currentDuration'),
   currentRequester: $('currentRequester'),
+
+  nextPlaying: $('nextPlaying'),
+  nextThumbnail: $('nextThumbnail'),
+  nextTitle: $('nextTitle'),
+  nextChannel: $('nextChannel'),
+  nextDuration: $('nextDuration'),
+  nextRequester: $('nextRequester'),
 
   queueList: $('queueList'),
   queueCount: $('queueCount'),
@@ -282,6 +290,7 @@ async function refreshState() {
     state.current = nextState.current
     state.queue = nextState.queue ?? []
     state.isPaused = Boolean(nextState.isPaused)
+    state.nextTrack = nextState.nextTrack ?? null
 
     renderState()
   } catch (error) {
@@ -291,6 +300,7 @@ async function refreshState() {
 
 function renderState() {
   renderCurrent()
+  renderNext()
   renderQueue()
   renderPlayPause()
 
@@ -308,11 +318,27 @@ function renderCurrent() {
   dom.noPlaying.style.display = 'none'
 
   dom.currentThumbnail.src = state.current.thumbnail
+  dom.currentThumbnail.alt = state.current.title
   dom.currentTitle.textContent = state.current.title
   dom.currentChannel.textContent = state.current.channelTitle
   dom.currentViews.textContent = `${formatViews(state.current.views)} views`
   dom.currentDuration.textContent = formatDuration(state.current.duration)
   dom.currentRequester.textContent = `@${state.current.requestedBy}`
+}
+
+function renderNext() {
+  if (!state.nextTrack) {
+    dom.nextPlaying.classList.add('hidden')
+    return
+  }
+
+  dom.nextPlaying.classList.remove('hidden')
+  dom.nextThumbnail.src = state.nextTrack.thumbnail
+  dom.nextThumbnail.alt = state.nextTrack.title
+  dom.nextTitle.textContent = state.nextTrack.title
+  dom.nextChannel.textContent = state.nextTrack.channelTitle
+  dom.nextDuration.textContent = formatDuration(state.nextTrack.duration)
+  dom.nextRequester.textContent = state.nextTrack.source === 'queue' ? `@${state.nextTrack.requestedBy}` : '@Jam'
 }
 
 let lastQueueKey = ''
@@ -326,18 +352,17 @@ function renderQueue() {
 
   if (queueKey === lastQueueKey) return
 
-  lastQueueKey = queueKey
-
   if (!state.queue.length) {
     dom.queueList.innerHTML = '<div class="empty">Queue is empty</div>'
-
     return
   }
+
+  lastQueueKey = queueKey
 
   dom.queueList.innerHTML = state.queue
     .map(
       (item, index) => `
-        <div class="row" data-queue-index="${index}">
+        <div class="row-wrapper" data-queue-index="${index}">
           <div class="row flex-1">
             <span class="text-secondary">#${index + 1}</span>
 
@@ -476,7 +501,7 @@ function renderSearchResults(results) {
     .map(
       (song) => `
         <div
-          class="row row-hover"
+          class="row-wrapper row-hover"
           data-action="add"
           data-video-id="${escapeHtml(song.videoId)}"
         >
@@ -565,7 +590,9 @@ function renderFallback() {
   if (!data?.upNext?.length) {
     dom.fallbackInfo.innerHTML = ''
     dom.fallbackList.innerHTML = '<div class="empty">Fallback is empty</div>'
-
+    dom.fallbackShuffleBtn.classList.remove('active')
+    dom.fallbackRepeatBtn.classList.remove('active')
+    dom.fallbackEnabledToggle.checked = false
     return
   }
 
@@ -585,9 +612,12 @@ function renderFallback() {
   dom.fallbackEnabledToggle.checked = data.enabled
   dom.fallbackInfo.textContent = `${data.upNext.length} треков · обновлён ${formattedDate}`
   dom.fallbackList.innerHTML = data.upNext
-    .map(
-      (track, index) => `
-        <div class="row ${index === data.nextIndex ? 'row-active' : ''}">
+    .map((track) => {
+      const isActive = track.videoId === data.activeVideoId
+      const rowClass = isActive ? 'row-active' : track.isPlayed ? 'row-played' : ''
+
+      return `
+        <div class="row-wrapper ${rowClass}">
           <div class="row flex-1">
             <img
               src="${escapeHtml(track.thumbnail)}"
@@ -611,7 +641,7 @@ function renderFallback() {
           </div>
         </div>
       `
-    )
+    })
     .join('')
 }
 
@@ -621,7 +651,6 @@ async function refreshFallback() {
       await api.refreshFallback()
       await refreshFallbackState()
     } catch (error) {
-      console.error(error)
       log('Error refreshing fallback:', error)
     }
   })
@@ -652,7 +681,6 @@ async function toggleFallbackEnabled() {
   } catch (error) {
     dom.fallbackEnabledToggle.checked = !dom.fallbackEnabledToggle.checked
     log('Failed to toggle enabled:', error)
-    console.error(error)
   }
 }
 
