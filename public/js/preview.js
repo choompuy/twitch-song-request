@@ -8,6 +8,7 @@ const log = createLogger('PREVIEW')
 
 const dom = {
   playerWrapper: $('playerWrapper'),
+  badge: $('nowPlaying'),
   currentThumbnail: $('currentThumbnail'),
   currentTitle: $('currentTitle'),
   currentChannel: $('currentChannel'),
@@ -16,41 +17,41 @@ const dom = {
   elapsedTime: $('elapsedTime')
 }
 
-async function fetchSettings() {
+async function fetchPreviewState() {
   try {
-    const response = await fetch('/api/settings')
-    settings = await response.json()
+    const response = await fetch('/api/preview-state')
+    const data = await response.json()
+    settings = data.settings
+    renderState(data.state)
   } catch (error) {
     log('Error fetching settings:', error)
   }
 }
 
 function updateMediaVisibility(state) {
-  dom.playerWrapper.classList.toggle('hidden', !settings.showVideo)
-  dom.currentThumbnail.classList.toggle('hidden', settings.showVideo)
+  dom.playerWrapper.classList.toggle('hidden', !state.showVideo)
+  dom.currentThumbnail.classList.toggle('hidden', state.showVideo)
 }
 
 function renderCurrent(state) {
-  const badge = $('nowPlaying')
-
   if (!state.current) {
-    badge.classList.remove('visible')
+    dom.badge.classList.remove('visible')
     return
   }
 
-  badge.dataset.position = settings.position
-  currentThumbnail.src = state.current.thumbnail
+  dom.badge.dataset.position = settings.position
+  dom.currentThumbnail.src = state.current.thumbnail
   dom.currentTitle.textContent = state.current.title
   dom.currentChannel.textContent = state.current.channelTitle
   dom.currentRequester.textContent = `@${state.current.requestedBy}`
 
-  badge.classList.add('visible')
+  dom.badge.classList.add('visible')
 }
 
 function renderState(state) {
   currentState = state
   renderCurrent(state)
-  updateMediaVisibility(state)
+  updateMediaVisibility(settings)
 
   if (isPlayerReady) {
     if (state.isPaused) {
@@ -92,20 +93,10 @@ function updateProgress() {
   dom.elapsedTime.textContent = `${formatDuration(Math.floor(currentTime))} / ${formatDuration(duration)}`
 }
 
-async function fetchState() {
-  try {
-    const response = await fetch('/api/state')
-    const state = await response.json()
-    renderState(state)
-  } catch (error) {
-    log('Error fetching state:', error)
-  }
-}
-
 async function notifyEnded() {
   try {
     await fetch('/api/player/ended', { method: 'POST' })
-    await fetchState()
+    await fetchPreviewState()
   } catch (error) {
     log('Error notifying ended:', error)
   }
@@ -114,7 +105,7 @@ async function notifyEnded() {
 function onPlayerReady(event) {
   log('Player ready')
   isPlayerReady = true
-  fetchState()
+  fetchPreviewState()
 }
 
 function onPlayerStateChange(event) {
@@ -171,8 +162,7 @@ window.onYouTubeIframeAPIReady = () => {
 }
 
 setInterval(() => {
-  fetchSettings()
-  fetchState()
+  fetchPreviewState()
   updateProgress()
 }, 1000)
 

@@ -102,7 +102,7 @@
           <div class="panel">
             <h2>Preview Settings</h2>
             <label class="row">
-              <input type="checkbox" id="showVideo" onchange="saveSettings()" />
+              <input type="checkbox" id="showVideo" onchange="savePreviewSettings()" />
               Показать видео
             </label>
             <div class="preview-url">OBS URL: <a href="/preview" target="_blank">/preview</a></div>
@@ -143,6 +143,10 @@
                 <input class="input" type="number" id="cfgMinViews" min="0" />
               </label>
               <label>
+                Min duration (sec)
+                <input class="input" type="number" id="cfgMinDuration" min="0" />
+              </label>
+              <label>
                 Max duration (sec)
                 <input class="input" type="number" id="cfgMaxDuration" min="0" />
               </label>
@@ -155,16 +159,11 @@
                 <input class="input" type="number" id="cfgMaxPerUser" min="0" />
               </label>
               <label>
-                Cooldown (sec)
-                <input class="input" type="number" id="cfgCooldown" min="0" />
-              </label>
-              <label>
-                Fallback playlist ID
-                <input class="input" type="text" id="cfgFallbackPlaylist" placeholder="Playlist..." />
+                Fallback playlist
+                <input class="input" type="text" id="cfgFallbackPlaylist" placeholder="ID or link to playlist" />
               </label>
             </div>
-            <button id="saveConfigBtn" class="btn" onclick="saveConfig()">Save settings</button>
-            <button id="saveSecretsBtn" class="btn" onclick="saveSecrets()">Save keys</button>
+            <button id="saveConfigSettingBtn" class="btn" onclick="saveConfigSetting()">Save settings</button>
           </div>
         </div>
       </div>

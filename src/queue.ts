@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { getRuntimeConfig } from './runtimeConfig.js'
+import { getConfig } from './config.js'
 import { getSettings, setSettings } from './settings.js'
 import { fetchPlaylistSongs } from './youtube/index.js'
 import { Settings, QueueItem, Song, PlayerState } from './types.js'
@@ -18,7 +18,6 @@ const STATE_FILE = join(DATA_DIR, 'queue-state.json')
 const STATE_TMP_FILE = `${STATE_FILE}.tmp`
 
 const SAVE_DEBOUNCE_MS = 250
-const RATE_LIMIT_CLEANUP_INTERVAL_MS = 10 * 60 * 1000 // 10 минут
 
 let currentSong: QueueItem | null = null
 const queue: QueueItem[] = []
@@ -126,20 +125,6 @@ export async function flushQueueState(): Promise<void> {
 
 loadState()
 
-// Метки времени последнего запроса полезны только в течение cooldownSeconds —
-// без очистки userLastRequestTime растёт бесконечно с каждым новым юзером.
-setInterval(() => {
-  const cooldownMs = getRuntimeConfig().cooldownSeconds * 1000
-  if (cooldownMs <= 0) return
-
-  const now = Date.now()
-  for (const [user, lastRequestTime] of userLastRequestTime) {
-    if (now - lastRequestTime >= cooldownMs) {
-      userLastRequestTime.delete(user)
-    }
-  }
-}, RATE_LIMIT_CLEANUP_INTERVAL_MS).unref()
-
 function shuffle<T>(items: T[]): T[] {
   const array = [...items]
 
@@ -152,7 +137,7 @@ function shuffle<T>(items: T[]): T[] {
 }
 
 export async function refreshFallbackPlaylist(): Promise<void> {
-  const playlistId = getRuntimeConfig().fallbackPlaylistId
+  const playlistId = getConfig().fallbackPlaylistId
 
   if (!playlistId) {
     fallbackTracks = []
@@ -249,14 +234,8 @@ export function getIsPaused(): boolean {
  * из addSong, чтобы основной путь читался как плоская линейная логика.
  */
 function assertCanAddSong(song: Song, requestedBy: string, addToQueue: boolean, now: number): void {
-  const runtimeConfig = getRuntimeConfig()
+  const config = getConfig()
   const normalized = requestedBy.toLowerCase()
-
-  const lastRequestTime = userLastRequestTime.get(normalized) ?? 0
-  if (runtimeConfig.cooldownSeconds > 0 && lastRequestTime > 0 && now - lastRequestTime < runtimeConfig.cooldownSeconds * 1000) {
-    const left = Math.ceil((runtimeConfig.cooldownSeconds * 1000 - (now - lastRequestTime)) / 1000)
-    throw new Error(`слишком часто. попробуйте через ${left} сек.`)
-  }
 
   if (currentSong?.videoId === song.videoId && !currentSong.isFallback) {
     throw new Error('этот трек уже находится в очереди')
@@ -266,15 +245,13 @@ function assertCanAddSong(song: Song, requestedBy: string, addToQueue: boolean, 
     throw new Error('этот трек уже находится в очереди')
   }
 
-  if (addToQueue && queue.length >= runtimeConfig.maxQueueSize) {
+  if (addToQueue && queue.length >= config.maxQueueSize) {
     throw new Error('очередь заполнена')
   }
 
-  const activeCount = getUserActiveCount(requestedBy)
-  if (runtimeConfig.maxRequestsPerUser > 0 && activeCount >= runtimeConfig.maxRequestsPerUser) {
-    throw new Error(
-      `вы можете заказать только ${runtimeConfig.maxRequestsPerUser} трек${runtimeConfig.maxRequestsPerUser > 1 ? 'а' : ''} одновременно`
-    )
+  const activeCount = getUserActiveCount(normalized)
+  if (config.maxRequestsPerUser > 0 && activeCount >= config.maxRequestsPerUser) {
+    throw new Error(`вы можете заказать только ${config.maxRequestsPerUser} трек${config.maxRequestsPerUser > 1 ? 'а' : ''} одновременно`)
   }
 }
 

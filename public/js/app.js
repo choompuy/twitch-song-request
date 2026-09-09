@@ -18,10 +18,10 @@ const dom = {
   showVideo: $('showVideo'),
 
   cfgMinViews: $('cfgMinViews'),
+  cfgMinDuration: $('cfgMinDuration'),
   cfgMaxDuration: $('cfgMaxDuration'),
   cfgMaxQueue: $('cfgMaxQueue'),
   cfgMaxPerUser: $('cfgMaxPerUser'),
-  cfgCooldown: $('cfgCooldown'),
   cfgFallbackPlaylist: $('cfgFallbackPlaylist'),
 
   secYoutubeKey: $('secYoutubeKey'),
@@ -52,6 +52,18 @@ const dom = {
   refreshFallbackBtn: $('refreshFallbackBtn'),
   shuffleFallbackBtn: $('shuffleFallbackBtn')
 }
+
+const CONFIG_FIELDS = [
+  { key: 'minViews', dom: 'cfgMinViews', type: 'number' },
+  { key: 'minDurationSeconds', dom: 'cfgMinDuration', type: 'number' },
+  { key: 'maxDurationSeconds', dom: 'cfgMaxDuration', type: 'number' },
+  { key: 'maxQueueSize', dom: 'cfgMaxQueue', type: 'number' },
+  { key: 'maxRequestsPerUser', dom: 'cfgMaxPerUser', type: 'number' },
+  { key: 'fallbackPlaylistId', dom: 'cfgFallbackPlaylist', type: 'text' }
+]
+
+const YOUTUBE_URL_PATTERN =
+  /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/
 
 async function request(url, options = {}) {
   const response = await fetch(url, {
@@ -165,7 +177,7 @@ const api = {
     })
 }
 
-async function loadSettings() {
+async function loadPreviewSettings() {
   try {
     state.settings = await api.getSettings()
 
@@ -177,7 +189,7 @@ async function loadSettings() {
   }
 }
 
-async function saveSettings() {
+async function savePreviewSettings() {
   try {
     state.settings.showVideo = dom.showVideo.checked
 
@@ -193,57 +205,46 @@ async function loadConfig() {
   try {
     state.config = await api.getConfig()
 
-    dom.cfgMinViews.value = state.config.minViews
-    dom.cfgMaxDuration.value = state.config.maxDurationSeconds
-    dom.cfgMaxQueue.value = state.config.maxQueueSize
-    dom.cfgMaxPerUser.value = state.config.maxRequestsPerUser
-    dom.cfgCooldown.value = state.config.cooldownSeconds
-    dom.cfgFallbackPlaylist.value = state.config.fallbackPlaylistId ?? ''
+    for (const field of CONFIG_FIELDS) {
+      const input = dom[field.dom]
+      if (!input) continue
+      input.value = state.config[field.key] ?? ''
+    }
   } catch (error) {
     log('Error loading config:', error)
-  }
-}
-
-async function saveConfig() {
-  const config = {
-    minViews: Number(dom.cfgMinViews.value),
-    maxDurationSeconds: Number(dom.cfgMaxDuration.value),
-    maxQueueSize: Number(dom.cfgMaxQueue.value),
-    maxRequestsPerUser: Number(dom.cfgMaxPerUser.value),
-    cooldownSeconds: Number(dom.cfgCooldown.value),
-    fallbackPlaylistId: dom.cfgFallbackPlaylist.value.trim()
-  }
-
-  try {
-    state.config = await api.updateConfig(config)
-  } catch (error) {
-    log('Error saving config:', error)
   }
 }
 
 async function loadSecrets() {
   try {
     const data = await api.getSecrets()
-
     dom.secretsStatus.textContent = data.hasYoutubeApiKey ? 'YouTube API key is configured' : 'YouTube API key is not configured'
   } catch (error) {
     log('Error loading secrets:', error)
   }
 }
 
-async function saveSecrets() {
+async function saveConfigSetting() {
+  const config = {}
+
+  for (const field of CONFIG_FIELDS) {
+    const input = dom[field.dom]
+    if (!input) continue
+    config[field.key] = field.type === 'number' ? Number(input.value) : input.value.trim()
+  }
+
   const youtubeApiKey = dom.secYoutubeKey.value.trim()
 
-  if (!youtubeApiKey) return
-
   try {
-    await api.updateSecrets({ youtubeApiKey })
+    state.config = await api.updateConfig(config)
 
-    dom.secYoutubeKey.value = ''
-
-    await loadSecrets()
+    if (youtubeApiKey) {
+      await api.updateSecrets({ youtubeApiKey })
+      dom.secYoutubeKey.value = ''
+      await loadSecrets()
+    }
   } catch (error) {
-    log('Error saving secrets:', error)
+    log('Error saving settings:', error)
   }
 }
 
@@ -397,9 +398,6 @@ async function skipCurrent() {
     log('Error skipping:', error)
   }
 }
-
-const YOUTUBE_URL_PATTERN =
-  /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/
 
 function showSearchError(message) {
   dom.searchError.textContent = message
@@ -616,8 +614,6 @@ dom.searchInput?.addEventListener('keydown', (event) => {
   }
 })
 
-dom.showVideo?.addEventListener('change', saveSettings)
-
 dom.queueList?.addEventListener('click', (event) => {
   const button = event.target.closest('[data-action="remove"]')
 
@@ -671,7 +667,7 @@ window.onYouTubeIframeAPIReady = () => {
 }
 
 async function init() {
-  await Promise.all([loadSecrets(), loadConfig(), loadSettings(), refreshState(), refreshFallbackState()])
+  await Promise.allSettled([loadSecrets(), loadConfig(), loadPreviewSettings(), refreshState(), refreshFallbackState()])
 
   setInterval(refreshState, 2000)
   setInterval(refreshFallbackState, 10000)

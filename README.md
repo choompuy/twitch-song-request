@@ -8,7 +8,6 @@ Minimal Song Request backend + web player for Twitch/Streamer.bot.
 - maximum 8 minutes (480 seconds)
 - maximum 20 queued songs
 - maximum 4 active requests per user
-- 60 second cooldown between requests
 - only embeddable + syndicated YouTube videos
 - YouTube Music category
 - duplicate videos are rejected

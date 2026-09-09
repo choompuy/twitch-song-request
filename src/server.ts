@@ -3,8 +3,21 @@ import express from 'express'
 import cors from 'cors'
 import open from 'open'
 
+import {
+  StateResponse,
+  SettingsResponse,
+  PreviewStateResponse,
+  ConfigResponse,
+  SearchResponse,
+  QueueRequestResponse,
+  FallbackStateResponse,
+  QueueRemoveResponse,
+  SecretsResponse
+} from './types.js'
+import { ok, fail, failFromError } from './http.js'
 import { getPublicSecretsView, updateSecrets } from './secrets.js'
-import { getRuntimeConfig, updateRuntimeConfig } from './runtimeConfig.js'
+import { getConfig, updateConfig } from './config.js'
+import { getSettings, updateSettings } from './settings.js'
 import { searchSongs, getVideoById, selectBestSong } from './youtube/index.js'
 import {
   getState,
@@ -19,7 +32,7 @@ import {
   setPaused,
   getFallbackState
 } from './queue.js'
-import { getSettings, updateSettings } from './settings.js'
+import { error } from 'console'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 3000
@@ -50,19 +63,6 @@ function log(message: string) {
   console.log(`[SERVER] ${message}`)
 }
 
-/**
- * Разбирает YouTube-ссылку: определяет, что это вообще YouTube,
- * и если да - пытается вытащить video ID.
- *
- * Поддерживает:
- * - youtube.com/watch?v=...
- * - www.youtube.com/watch?v=...
- * - m.youtube.com/watch?v=...
- * - youtu.be/...
- * - youtube.com/shorts/...
- * - youtube.com/embed/...
- * - youtube.com/v/...
- */
 function parseYouTubeUrl(input: string): { isYouTube: boolean; videoId: string | null } {
   let url: URL
 
@@ -99,26 +99,24 @@ function isValidVideoId(value: string | null | undefined): value is string {
   return Boolean(value && /^[a-zA-Z0-9_-]{11}$/.test(value))
 }
 
-function getErrorInfo(error: unknown): {
-  code: string
-  status: number
-  message: string
-} {
-  const message = error instanceof Error ? error.message : 'не удалось добавить трек'
-  const errorTable = [
-    { test: (m: string) => m.includes('уже находится'), code: 'DUPLICATE', status: 409 },
-    { test: (m: string) => m.includes('очередь заполнена'), code: 'QUEUE_FULL', status: 409 },
-    { test: (m: string) => m.includes('вы можете заказать'), code: 'USER_LIMIT', status: 409 },
-    { test: (m: string) => m.includes('слишком часто'), code: 'COOLDOWN', status: 409 },
-    { test: (m: string) => m.includes('лимит YouTube API'), code: 'YOUTUBE_QUOTA', status: 503 },
-    { test: (m: string) => m.includes('YouTube'), code: 'YOUTUBE_ERROR', status: 503 }
-  ]
-  const matched = errorTable.find((entry) => entry.test(message))
-  return {
-    code: matched?.code ?? 'SERVER_ERROR',
-    status: matched?.status ?? 500,
-    message
+function parsePlaylistId(input: string): string | null {
+  const trimmed = input.trim()
+
+  if (!trimmed) {
+    return null
   }
+
+  try {
+    const url = new URL(trimmed)
+    const listParam = url.searchParams.get('list')
+    if (listParam) {
+      return listParam
+    }
+  } catch (error) {
+    // не URL - считаем, что это уже голый ID, пропускаем дальше
+  }
+
+  return trimmed
 }
 
 app.get('/preview', (_req, res) => {
@@ -128,68 +126,65 @@ app.get('/preview', (_req, res) => {
 })
 
 app.get('/api/state', (_req, res) => {
-  res.json(getState())
+  ok<StateResponse>(res, getState())
 })
 
 app.get('/api/settings', (_req, res) => {
-  res.json(getSettings())
+  ok<SettingsResponse>(res, getSettings())
 })
 
 app.put('/api/settings', (req, res) => {
   const updates = req.body ?? {}
   const updated = updateSettings(updates)
-  res.json(updated)
+  ok<SettingsResponse>(res, updated)
+})
+
+app.get('/api/preview-state', (_req, res) => {
+  ok<PreviewStateResponse>(res, { state: getState(), settings: getSettings() })
 })
 
 app.get('/api/config', (_req, res) => {
-  res.json(getRuntimeConfig())
+  ok<ConfigResponse>(res, getConfig())
 })
 
 app.put('/api/config', async (req, res) => {
-  const previous = getRuntimeConfig()
-  const updated = updateRuntimeConfig(req.body ?? {})
+  const body = { ...(req.body ?? {}) }
+
+  if (typeof body.fallbackPlaylistId === 'string') {
+    body.fallbackPlaylistId = parsePlaylistId(body.fallbackPlaylistId) ?? ''
+  }
+
+  const previous = getConfig()
+  const updated = updateConfig(body ?? {})
 
   if (updated.fallbackPlaylistId !== previous.fallbackPlaylistId) {
     try {
       await refreshFallbackPlaylist()
     } catch (error) {
       log(`[ERROR] Failed to refresh fallback playlist: ${error instanceof Error ? error.message : error}`)
-      return res.json({
+      return ok<ConfigResponse>(res, {
         ...updated,
         fallbackPlaylistWarning: 'не удалось загрузить плейлист, проверьте ID'
       })
     }
   }
 
-  res.json(updated)
+  ok<ConfigResponse>(res, updated)
 })
 
 app.get('/api/search', async (req, res) => {
   const query = typeof req.query.q === 'string' ? req.query.q.trim() : ''
 
   if (query.length < 2) {
-    return res.status(400).json({
-      success: false,
-      error: 'запрос должен содержать минимум 2 символа',
-      code: 'INVALID_QUERY'
-    })
+    return fail(res, 'запрос должен содержать минимум 2 символа', 'INVALID_QUERY', 400)
   }
 
   try {
     const songs = await searchSongs(query)
-    return res.json({
-      success: true,
-      results: songs
-    })
+    ok<SearchResponse>(res, { results: songs })
   } catch (error) {
     log(`[ERROR] Search: ${error instanceof Error ? error.message : error}`)
-    const info = getErrorInfo(error)
-    return res.status(info.status).json({
-      success: false,
-      error: info.message,
-      code: info.code,
-      results: []
-    })
+    failFromError(res, error)
   }
 })
 
@@ -197,19 +192,11 @@ app.post('/api/queue/request', async (req, res) => {
   const { query, requestedBy } = req.body ?? {}
 
   if (typeof query !== 'string' || query.trim().length < 2 || query.trim().length > 200) {
-    return res.status(400).json({
-      success: false,
-      error: 'запрос должен быть от 2 до 200 символов',
-      code: 'INVALID_QUERY'
-    })
+    return fail(res, 'запрос должен быть от 2 до 200 символов', 'INVALID_QUERY', 400)
   }
 
   if (typeof requestedBy !== 'string' || requestedBy.trim().length === 0) {
-    return res.status(400).json({
-      success: false,
-      error: 'имя пользователя обязательно',
-      code: 'INVALID_REQUEST'
-    })
+    return fail(res, 'имя пользователя обязательно', 'INVALID_REQUEST', 400)
   }
 
   const trimmedQuery = query.trim()
@@ -221,11 +208,7 @@ app.post('/api/queue/request', async (req, res) => {
 
     if (isYouTube && !videoId) {
       log(`[REJECT] ${trimmedRequestedBy} → INVALID_YOUTUBE_URL`)
-      return res.status(400).json({
-        success: false,
-        error: 'некорректная ссылка на YouTube',
-        code: 'INVALID_YOUTUBE_URL'
-      })
+      return fail(res, 'некорректная ссылка на YouTube', 'INVALID_YOUTUBE_URL', 400)
     }
 
     if (videoId) {
@@ -239,11 +222,7 @@ app.post('/api/queue/request', async (req, res) => {
 
     if (!song) {
       log(`[REJECT] ${trimmedRequestedBy} → SONG_NOT_FOUND`)
-      return res.status(404).json({
-        success: false,
-        error: 'не удалось найти подходящий трек',
-        code: 'SONG_NOT_FOUND'
-      })
+      return fail(res, 'не удалось найти подходящий трек', 'SONG_NOT_FOUND', 404)
     }
 
     const stateBefore = getState()
@@ -259,135 +238,100 @@ app.post('/api/queue/request', async (req, res) => {
 
     const state = getState()
     const position = wasEmpty ? 0 : state.queue.length
-    return res.status(201).json({
-      success: true,
-      message: wasEmpty ? `добавлено: ${song.title} - сейчас играет` : `добавлено: ${song.title} - позиция #${position}`,
-      song: item,
-      started: wasEmpty,
-      position,
-      state
-    })
+
+    ok<QueueRequestResponse>(
+      res,
+      {
+        message: wasEmpty ? `добавлено: ${song.title} - сейчас играет` : `добавлено: ${song.title} - позиция #${position}`,
+        song: item,
+        started: wasEmpty,
+        position,
+        state
+      },
+      201
+    )
   } catch (error) {
-    const info = getErrorInfo(error)
-    log(`[REJECT] ${trimmedRequestedBy} → ${info.code}: ${info.message}`)
-    return res.status(info.status).json({
-      success: false,
-      error: info.message,
-      code: info.code
-    })
+    log(`[REJECT] ${trimmedRequestedBy} → error while adding song`)
+    failFromError(res, error)
   }
 })
 
 app.post('/api/player/ended', (_req, res) => {
   moveToNext()
-  return res.json({
-    success: true,
-    state: getState()
-  })
+  ok<StateResponse>(res, getState())
 })
 
 app.post('/api/player/skip', (req, res) => {
   skipCurrent()
-  return res.json({
-    success: true,
-    state: getState()
-  })
+  ok<StateResponse>(res, getState())
 })
 
 app.post('/api/player/pause', (_req, res) => {
   setPaused(true)
-  return res.json({
-    success: true,
-    state: getState()
-  })
+  ok<StateResponse>(res, getState())
 })
 
 app.post('/api/player/resume', (_req, res) => {
   setPaused(false)
-  return res.json({
-    success: true,
-    state: getState()
-  })
+  ok<StateResponse>(res, getState())
 })
 
 app.get('/api/fallback', (_req, res) => {
-  res.json(getFallbackState())
+  ok<FallbackStateResponse>(res, getFallbackState())
 })
 
 app.post('/api/fallback/refresh', async (_req, res) => {
   try {
+    parsePlaylistId
     await refreshFallbackPlaylist()
-    res.json({ success: true, ...getFallbackState() })
+    ok<FallbackStateResponse>(res, getFallbackState())
   } catch {
-    res.status(400).json({ success: false, error: 'не удалось обновить плейлист, проверь ID' })
+    fail(res, 'не удалось обновить плейлист, проверь ID', 'FALLBACK_REFRESH_FAILED', 400)
   }
 })
 
 app.post('/api/fallback/shuffle', (_req, res) => {
   shuffleFallback()
-  res.json({ success: true, ...getFallbackState() })
+  ok<FallbackStateResponse>(res, getFallbackState())
 })
 
 app.delete('/api/queue/:index', (req, res) => {
   const index = Number(req.params.index)
 
   if (!Number.isInteger(index) || index < 0) {
-    return res.status(400).json({
-      success: false,
-      error: 'некорректный индекс',
-      code: 'INVALID_INDEX'
-    })
+    return fail(res, 'некорректный индекс', 'INVALID_INDEX', 400)
   }
 
   const removed = removeAt(index)
 
   if (!removed) {
-    return res.status(404).json({
-      success: false,
-      error: 'элемент очереди не найден',
-      code: 'QUEUE_ITEM_NOT_FOUND'
-    })
+    return fail(res, 'элемент очереди не найден', 'QUEUE_ITEM_NOT_FOUND', 404)
   }
 
-  return res.json({
-    success: true,
-    removed,
-    state: getState()
-  })
+  ok<QueueRemoveResponse>(res, { removed, state: getState() })
 })
 
 app.post('/api/queue/clear', (_req, res) => {
   clearQueue()
-  return res.json({
-    success: true,
-    state: getState()
-  })
+  ok<StateResponse>(res, getState())
 })
 
 app.get('/api/secrets', (_req, res) => {
-  res.json(getPublicSecretsView())
+  ok<SecretsResponse>(res, getPublicSecretsView())
 })
 
 app.put('/api/secrets', (req, res) => {
   updateSecrets(req.body ?? {})
-  res.json(getPublicSecretsView())
+  ok<SecretsResponse>(res, getPublicSecretsView())
 })
 
 app.use('/api', (_req, res) => {
-  return res.status(404).json({
-    success: false,
-    error: 'API endpoint not found',
-    code: 'NOT_FOUND'
-  })
+  fail(res, 'API endpoint not found', 'NOT_FOUND', 404)
 })
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   log(`[ERROR] ${err.message}`)
-  return res.status(500).json({
-    success: false,
-    error: 'внутренняя ошибка сервера',
-    code: 'SERVER_ERROR'
-  })
+  fail(res, 'внутренняя ошибка сервера', 'SERVER_ERROR', 500)
 })
 
 app.listen(PORT, async () => {

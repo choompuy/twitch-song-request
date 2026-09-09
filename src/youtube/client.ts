@@ -1,5 +1,5 @@
 import { getSecrets } from '../secrets.js'
-import { getRuntimeConfig } from '../runtimeConfig.js'
+import { getConfig } from '../config.js'
 import { Song } from '../types.js'
 import { VideoItem } from './types.js'
 import { isoDurationToSeconds } from './scoring.js'
@@ -54,11 +54,16 @@ export function videoToSong(video: VideoItem): Song {
 }
 
 export function isValidSong(song: Song, video: VideoItem): boolean {
-  const runtimeConfig = getRuntimeConfig()
+  const config = getConfig()
+
   const isMusic = video.snippet?.categoryId === '10'
   const isEmbeddable = video.status?.embeddable !== false
-  const validDuration = song.duration >= 60 && song.duration <= runtimeConfig.maxDurationSeconds
-  const validViews = song.views >= runtimeConfig.minViews
+  const validDuration = song.duration >= config.minDurationSeconds && song.duration <= config.maxDurationSeconds
+  const validViews = song.views >= config.minViews
 
-  return isMusic && isEmbeddable && validDuration && validViews
+  if (!isMusic || !isEmbeddable || !validDuration || !validViews) {
+    return false
+  }
+
+  return true
 }
