@@ -4,8 +4,17 @@ export type Config = {
   maxDurationSeconds: number
   maxQueueSize: number
   maxRequestsPerUser: number
-  fallbackPlaylistId: string
+  fallbackPlaylist: FallbackPlaylist
 }
+
+export type FallbackPlaylist = {
+  playlistId: string | null
+  enabled: boolean
+  shuffle: boolean
+  repeat: boolean
+  playedBehavior: FallbackPlayedBehavior
+}
+export type FallbackPlayedBehavior = 'requeue' | 'remove'
 
 export type Settings = {
   showVideo: boolean
@@ -80,11 +89,10 @@ export type QueueRequestResponse = {
   state: PlayerState
 }
 export type FallbackTrackView = Pick<Song, 'videoId' | 'title' | 'channelTitle' | 'thumbnail' | 'duration'>
-export type FallbackStateResponse = {
-  playlistId: string | null
+export type FallbackStateResponse = FallbackPlaylist & {
   lastRefreshedAt: number | null
-  nextIndex: number
-  tracks: FallbackTrackView[]
+  upNext: FallbackTrackView[]
+  sourceCount: number
 }
 export type QueueRemoveResponse = { removed: QueueItem; state: PlayerState }
 export type SecretsResponse = { youtubeApiKey: string; hasYoutubeApiKey: boolean }

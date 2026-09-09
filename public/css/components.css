@@ -100,6 +100,11 @@
   padding: 0;
 }
 
+.btn-icon.active {
+  color: var(--accent-blue);
+  border: 1px solid var(--accent-blue);
+}
+
 .btn-danger {
   color: var(--accent-red);
 }

@@ -27,12 +27,13 @@ import {
   moveToNext,
   skipCurrent,
   setCurrent,
-  refreshFallbackPlaylist,
-  shuffleFallback,
+  refreshFallback,
   setPaused,
-  getFallbackState
+  getFallbackState,
+  toggleFallbackShuffle,
+  toggleFallbackRepeat,
+  toggleFallbackEnabled
 } from './queue.js'
-import { error } from 'console'
 
 const app = express()
 const PORT = Number(process.env.PORT) || 3000
@@ -112,7 +113,7 @@ function parsePlaylistId(input: string): string | null {
     if (listParam) {
       return listParam
     }
-  } catch (error) {
+  } catch {
     // не URL - считаем, что это уже голый ID, пропускаем дальше
   }
 
@@ -150,16 +151,16 @@ app.get('/api/config', (_req, res) => {
 app.put('/api/config', async (req, res) => {
   const body = { ...(req.body ?? {}) }
 
-  if (typeof body.fallbackPlaylistId === 'string') {
-    body.fallbackPlaylistId = parsePlaylistId(body.fallbackPlaylistId) ?? ''
+  if (typeof body.fallbackPlaylist.playlistId === 'string') {
+    body.fallbackPlaylist.playlistId = parsePlaylistId(body.fallbackPlaylist.playlistId) ?? ''
   }
 
   const previous = getConfig()
   const updated = updateConfig(body ?? {})
 
-  if (updated.fallbackPlaylistId !== previous.fallbackPlaylistId) {
+  if (updated.fallbackPlaylist.playlistId !== previous.fallbackPlaylist.playlistId) {
     try {
-      await refreshFallbackPlaylist()
+      await refreshFallback()
     } catch (error) {
       log(`[ERROR] Failed to refresh fallback playlist: ${error instanceof Error ? error.message : error}`)
       return ok<ConfigResponse>(res, {
@@ -167,6 +168,8 @@ app.put('/api/config', async (req, res) => {
         fallbackPlaylistWarning: 'не удалось загрузить плейлист, проверьте ID'
       })
     }
+  } else if (updated.fallbackPlaylist.shuffle !== previous.fallbackPlaylist.shuffle) {
+    toggleFallbackShuffle()
   }
 
   ok<ConfigResponse>(res, updated)
@@ -261,7 +264,7 @@ app.post('/api/player/ended', (_req, res) => {
   ok<StateResponse>(res, getState())
 })
 
-app.post('/api/player/skip', (req, res) => {
+app.post('/api/player/skip', (_req, res) => {
   skipCurrent()
   ok<StateResponse>(res, getState())
 })
@@ -282,17 +285,34 @@ app.get('/api/fallback', (_req, res) => {
 
 app.post('/api/fallback/refresh', async (_req, res) => {
   try {
-    parsePlaylistId
-    await refreshFallbackPlaylist()
-    ok<FallbackStateResponse>(res, getFallbackState())
+    ok<FallbackStateResponse>(res, await refreshFallback())
   } catch {
     fail(res, 'не удалось обновить плейлист, проверь ID', 'FALLBACK_REFRESH_FAILED', 400)
   }
 })
 
 app.post('/api/fallback/shuffle', (_req, res) => {
-  shuffleFallback()
-  ok<FallbackStateResponse>(res, getFallbackState())
+  try {
+    ok<FallbackStateResponse>(res, toggleFallbackShuffle())
+  } catch {
+    fail(res, 'не удалось изменить shuffle', 'FALLBACK_SHUFFLE_FAILED', 400)
+  }
+})
+
+app.post('/api/fallback/repeat', (_req, res) => {
+  try {
+    ok<FallbackStateResponse>(res, toggleFallbackRepeat())
+  } catch {
+    fail(res, 'не удалось изменить repeat', 'FALLBACK_REPEAT_FAILED', 400)
+  }
+})
+
+app.post('/api/fallback/enabled', (_req, res) => {
+  try {
+    ok<FallbackStateResponse>(res, toggleFallbackEnabled())
+  } catch {
+    fail(res, 'не удалось изменить состояние fallback', 'FALLBACK_ENABLED_FAILED', 400)
+  }
 })
 
 app.delete('/api/queue/:index', (req, res) => {
@@ -336,7 +356,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 app.listen(PORT, async () => {
   log(`Server running on http://localhost:${PORT}`)
-  await refreshFallbackPlaylist()
+  await refreshFallback()
   if (!getState().current) {
     moveToNext()
   }

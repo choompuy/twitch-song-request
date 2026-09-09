@@ -2,10 +2,10 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { getConfig } from './config.js'
+import { getConfig, updateConfig } from './config.js'
 import { getSettings, setSettings } from './settings.js'
 import { fetchPlaylistSongs } from './youtube/index.js'
-import { Settings, QueueItem, Song, PlayerState } from './types.js'
+import { Settings, QueueItem, Song, PlayerState, FallbackStateResponse } from './types.js'
 
 type StateFile = {
   current: QueueItem | null
@@ -25,8 +25,8 @@ const queueVideoIds = new Set<string>()
 
 let isPaused = false
 
-let fallbackTracks: Song[] = []
-let fallbackIndex = 0
+let fallbackSourceTracks: Song[] = []
+let fallbackPlayQueue: Song[] = []
 let loadedFallbackPlaylistId: string | null = null
 let lastFallbackRefreshAt: number | null = null
 
@@ -90,12 +90,6 @@ async function persistStateNow(): Promise<void> {
   await rename(STATE_TMP_FILE, STATE_FILE)
 }
 
-/**
- * Дебounced и сериализованная запись состояния. Несколько мутаций подряд
- * (например, серия addSong) схлопываются в одну запись на диск, а сами
- * запуски persistStateNow выстроены в цепочку промисов, чтобы две записи
- * никогда не выполнялись параллельно и не перемешали друг друга на диске.
- */
 function saveState(): void {
   if (saveTimer) {
     clearTimeout(saveTimer)
@@ -109,11 +103,6 @@ function saveState(): void {
   }, SAVE_DEBOUNCE_MS)
 }
 
-/**
- * Форсирует немедленное выполнение отложенной записи и дожидается её.
- * Вызывайте это из обработчика SIGTERM/SIGINT перед выходом процесса,
- * чтобы изменение очереди, сделанное прямо перед остановкой, не потерялось.
- */
 export async function flushQueueState(): Promise<void> {
   if (saveTimer) {
     clearTimeout(saveTimer)
@@ -136,44 +125,78 @@ function shuffle<T>(items: T[]): T[] {
   return array
 }
 
-export async function refreshFallbackPlaylist(): Promise<void> {
-  const playlistId = getConfig().fallbackPlaylistId
+function buildPlayQueue(tracks: Song[]): Song[] {
+  const config = getConfig()
+  return config.fallbackPlaylist.shuffle ? shuffle(tracks) : [...tracks]
+}
+
+export async function refreshFallback(): Promise<FallbackStateResponse> {
+  const playlistId = getConfig().fallbackPlaylist.playlistId
 
   if (!playlistId) {
-    fallbackTracks = []
-    fallbackIndex = 0
+    fallbackSourceTracks = []
+    fallbackPlayQueue = []
     loadedFallbackPlaylistId = null
     lastFallbackRefreshAt = null
-    return
+    return getFallbackState()
   }
 
-  const songs = await fetchPlaylistSongs(playlistId)
+  const newTracks = await fetchPlaylistSongs(playlistId)
+  const isFirstLoad = loadedFallbackPlaylistId !== playlistId
 
-  fallbackTracks = songs.map((song) => ({
-    ...song,
-    requestedBy: 'Jam',
-    addedAt: 0,
-    isFallback: true
-  }))
-  fallbackIndex = 0
+  if (isFirstLoad) {
+    fallbackSourceTracks = newTracks
+    fallbackPlayQueue = buildPlayQueue(newTracks)
+  } else {
+    const newIds = new Set(newTracks.map((track) => track.videoId))
+    const oldIds = new Set(fallbackSourceTracks.map((track) => track.videoId))
+
+    const addedTracks = newTracks.filter((track) => !oldIds.has(track.videoId))
+    const removedCount = fallbackSourceTracks.filter((track) => !newIds.has(track.videoId)).length
+
+    fallbackSourceTracks = newTracks
+    fallbackPlayQueue = fallbackPlayQueue.filter((track) => newIds.has(track.videoId))
+
+    const toAppend = getConfig().fallbackPlaylist.shuffle ? shuffle(addedTracks) : addedTracks
+    fallbackPlayQueue.push(...toAppend)
+
+    log(`[FALLBACK] Refreshed: +${addedTracks.length} added, -${removedCount} removed, ${fallbackPlayQueue.length} in rotation`)
+  }
+
   loadedFallbackPlaylistId = playlistId
   lastFallbackRefreshAt = Date.now()
 
-  log(`[FALLBACK] Loaded ${fallbackTracks.length} tracks from playlist ${playlistId}`)
+  log(`[FALLBACK] Loaded ${fallbackSourceTracks.length} tracks from playlist ${playlistId}`)
+  return getFallbackState()
 }
 
-export function shuffleFallback(): void {
-  fallbackTracks = shuffle(fallbackTracks)
-  fallbackIndex = 0
-  log(`[FALLBACK] Shuffled ${fallbackTracks.length} tracks`)
+export function toggleFallbackShuffle(): FallbackStateResponse {
+  const config = getConfig()
+  config.fallbackPlaylist.shuffle = !config.fallbackPlaylist.shuffle
+  fallbackPlayQueue = buildPlayQueue(fallbackSourceTracks)
+  log(`[FALLBACK] Shuffle: ${config.fallbackPlaylist.shuffle}`)
+  return getFallbackState()
 }
 
-export function getFallbackState() {
+export function toggleFallbackRepeat(): FallbackStateResponse {
+  const config = getConfig()
+  config.fallbackPlaylist.repeat = !config.fallbackPlaylist.repeat
+  log(`[FALLBACK] Repeat: ${config.fallbackPlaylist.repeat}`)
+  return getFallbackState()
+}
+
+export function getFallbackState(): FallbackStateResponse {
+  const config = getConfig()
+
   return {
     playlistId: loadedFallbackPlaylistId,
     lastRefreshedAt: lastFallbackRefreshAt,
-    nextIndex: fallbackIndex,
-    tracks: fallbackTracks.map((track) => ({
+    enabled: config.fallbackPlaylist.enabled,
+    shuffle: config.fallbackPlaylist.shuffle,
+    repeat: config.fallbackPlaylist.repeat,
+    playedBehavior: config.fallbackPlaylist.playedBehavior,
+    sourceCount: fallbackSourceTracks.length,
+    upNext: fallbackPlayQueue.slice(0, 10).map((track) => ({
       videoId: track.videoId,
       title: track.title,
       channelTitle: track.channelTitle,
@@ -183,20 +206,48 @@ export function getFallbackState() {
   }
 }
 
-function nextFallbackTrack(): QueueItem | null {
-  if (!fallbackTracks.length) return null
-
-  if (fallbackIndex >= fallbackTracks.length) {
-    fallbackIndex = 0
-  }
-
-  const song = fallbackTracks[fallbackIndex++]
+function toFallbackQueueItem(song: Song): QueueItem {
   return {
     ...song,
     requestedBy: 'Jam',
     addedAt: Date.now(),
     isFallback: true
   }
+}
+
+function nextFallbackTrack(): QueueItem | null {
+  const config = getConfig()
+
+  if (!config.fallbackPlaylist.enabled) {
+    return null
+  }
+
+  if (!fallbackPlayQueue.length) {
+    if (config.fallbackPlaylist.repeat && fallbackSourceTracks.length > 0) {
+      fallbackPlayQueue = buildPlayQueue(fallbackSourceTracks)
+    } else {
+      return null
+    }
+  }
+
+  const song = fallbackPlayQueue.shift()
+
+  if (!song) {
+    return null
+  }
+
+  if (config.fallbackPlaylist.playedBehavior === 'requeue') {
+    fallbackPlayQueue.push(song)
+  }
+
+  return toFallbackQueueItem(song)
+}
+
+export function toggleFallbackEnabled(): FallbackStateResponse {
+  const config = getConfig()
+  config.fallbackPlaylist.enabled = !config.fallbackPlaylist.enabled
+  updateConfig(config)
+  return getFallbackState()
 }
 
 function getUserActiveCount(username: string): number {
@@ -228,11 +279,6 @@ export function getIsPaused(): boolean {
   return isPaused
 }
 
-/**
- * Прогоняет все проверки, необходимые перед добавлением трека, и бросает
- * пользовательскую (русскоязычную) ошибку на первой же неудаче. Вынесено
- * из addSong, чтобы основной путь читался как плоская линейная логика.
- */
 function assertCanAddSong(song: Song, requestedBy: string, addToQueue: boolean, now: number): void {
   const config = getConfig()
   const normalized = requestedBy.toLowerCase()

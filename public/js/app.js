@@ -49,8 +49,10 @@ const dom = {
 
   fallbackInfo: $('fallbackInfo'),
   fallbackList: $('fallbackList'),
-  refreshFallbackBtn: $('refreshFallbackBtn'),
-  shuffleFallbackBtn: $('shuffleFallbackBtn')
+  fallbackRefreshBtn: $('fallbackRefreshBtn'),
+  fallbackRepeatBtn: $('fallbackRepeatBtn'),
+  fallbackShuffleBtn: $('fallbackShuffleBtn'),
+  fallbackEnabledToggle: $('fallbackEnabledToggle')
 }
 
 const CONFIG_FIELDS = [
@@ -59,7 +61,12 @@ const CONFIG_FIELDS = [
   { key: 'maxDurationSeconds', dom: 'cfgMaxDuration', type: 'number' },
   { key: 'maxQueueSize', dom: 'cfgMaxQueue', type: 'number' },
   { key: 'maxRequestsPerUser', dom: 'cfgMaxPerUser', type: 'number' },
-  { key: 'fallbackPlaylistId', dom: 'cfgFallbackPlaylist', type: 'text' }
+  {
+    key: 'playlistId',
+    path: 'fallbackPlaylist',
+    dom: 'cfgFallbackPlaylist',
+    type: 'text'
+  }
 ]
 
 const YOUTUBE_URL_PATTERN =
@@ -174,6 +181,16 @@ const api = {
   shuffleFallback: () =>
     request('/api/fallback/shuffle', {
       method: 'POST'
+    }),
+
+  repeatFallback: () =>
+    request('/api/fallback/repeat', {
+      method: 'POST'
+    }),
+
+  enabledFallback: () =>
+    request('/api/fallback/enabled', {
+      method: 'POST'
     })
 }
 
@@ -208,7 +225,9 @@ async function loadConfig() {
     for (const field of CONFIG_FIELDS) {
       const input = dom[field.dom]
       if (!input) continue
-      input.value = state.config[field.key] ?? ''
+
+      const value = field.path ? state.config[field.path]?.[field.key] : state.config[field.key]
+      input.value = value ?? ''
     }
   } catch (error) {
     log('Error loading config:', error)
@@ -230,7 +249,15 @@ async function saveConfigSetting() {
   for (const field of CONFIG_FIELDS) {
     const input = dom[field.dom]
     if (!input) continue
-    config[field.key] = field.type === 'number' ? Number(input.value) : input.value.trim()
+
+    const value = field.type === 'number' ? Number(input.value) : input.value.trim()
+
+    if (field.path) {
+      config[field.path] ??= {}
+      config[field.path][field.key] = value
+    } else {
+      config[field.key] = value
+    }
   }
 
   const youtubeApiKey = dom.secYoutubeKey.value.trim()
@@ -535,7 +562,7 @@ async function refreshFallbackState() {
 function renderFallback() {
   const data = state.fallback
 
-  if (!data?.tracks?.length) {
+  if (!data?.upNext?.length) {
     dom.fallbackInfo.innerHTML = ''
     dom.fallbackList.innerHTML = '<div class="empty">Fallback is empty</div>'
 
@@ -553,9 +580,11 @@ function renderFallback() {
       }).format(date)
     : '—'
 
-  dom.fallbackInfo.textContent = `${data.tracks.length} треков · обновлён ${formattedDate}`
-
-  dom.fallbackList.innerHTML = data.tracks
+  dom.fallbackShuffleBtn.classList.toggle('active', data.shuffle)
+  dom.fallbackRepeatBtn.classList.toggle('active', data.repeat)
+  dom.fallbackEnabledToggle.checked = data.enabled
+  dom.fallbackInfo.textContent = `${data.upNext.length} треков · обновлён ${formattedDate}`
+  dom.fallbackList.innerHTML = data.upNext
     .map(
       (track, index) => `
         <div class="row ${index === data.nextIndex ? 'row-active' : ''}">
@@ -587,25 +616,44 @@ function renderFallback() {
 }
 
 async function refreshFallback() {
-  await withLoading(dom.refreshFallbackBtn, async () => {
+  await withLoading(dom.fallbackRefreshBtn, async () => {
     try {
       await api.refreshFallback()
       await refreshFallbackState()
     } catch (error) {
+      console.error(error)
       log('Error refreshing fallback:', error)
     }
   })
 }
 
-async function shuffleFallback() {
-  await withLoading(dom.shuffleFallbackBtn, async () => {
-    try {
-      await api.shuffleFallback()
-      await refreshFallbackState()
-    } catch (error) {
-      log('Error shuffling fallback:', error)
-    }
-  })
+async function toggleFallbackShuffle() {
+  try {
+    state.fallback = await api.shuffleFallback()
+    renderFallback()
+  } catch (error) {
+    log('Failed to toggle shuffle:', error)
+  }
+}
+
+async function toggleFallbackRepeat() {
+  try {
+    state.fallback = await api.repeatFallback()
+    renderFallback()
+  } catch (error) {
+    log('Failed to toggle repeat:', error)
+  }
+}
+
+async function toggleFallbackEnabled() {
+  try {
+    state.fallback = await api.enabledFallback()
+    renderFallback()
+  } catch (error) {
+    dom.fallbackEnabledToggle.checked = !dom.fallbackEnabledToggle.checked
+    log('Failed to toggle enabled:', error)
+    console.error(error)
+  }
 }
 
 dom.searchInput?.addEventListener('keydown', (event) => {

@@ -68,18 +68,7 @@
                 <div id="fallbackInfo" class="text-sm text-secondary"></div>
               </div>
               <div class="panel-actions row">
-                <button class="btn btn-icon" onclick="refreshFallback()">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
-                    <path
-                      stroke="currentColor"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19.938 13q.062-.492.062-1A8 8 0 0 0 5.8 6.944M4.062 11Q4 11.492 4 12a8 8 0 0 0 14 5.292M15 17h3v.292M5.8 4v2.944m0 0V7h3M18 20v-2.708"
-                    />
-                  </svg>
-                </button>
-                <button class="btn btn-icon" onclick="shuffleFallback()">
+                <button id="fallbackShuffleBtn" class="btn btn-icon" onclick="toggleFallbackShuffle()" title="Shuffle">
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
                     <path
                       stroke="currentColor"
@@ -90,6 +79,32 @@
                     />
                   </svg>
                 </button>
+                <button id="fallbackRepeatBtn" class="btn btn-icon" onclick="toggleFallbackRepeat()" title="Repeat">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
+                    <path
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M14 7h2a6 6 0 0 1 0 12H8A6 6 0 0 1 8 7h2M7 4l3 3m0 0-3 3"
+                    />
+                  </svg>
+                </button>
+                <button id="fallbackRefreshBtn" class="btn btn-icon" onclick="refreshFallback()" title="Refresh">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
+                    <path
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 0 0 4.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 0 1-15.357-2m15.357 2H15"
+                    />
+                  </svg>
+                </button>
+                <label class="switch" title="Enable playlist">
+                  <input type="checkbox" id="fallbackEnabledToggle" onchange="toggleFallbackEnabled()" />
+                  <span class="switch-track"></span>
+                </label>
               </div>
             </div>
             <div class="panel-content">
