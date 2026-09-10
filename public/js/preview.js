@@ -14,7 +14,10 @@ const dom = {
   currentChannel: $('currentChannel'),
   currentRequester: $('currentRequester'),
   progressBar: $('progressBar'),
-  elapsedTime: $('elapsedTime')
+  elapsedTime: $('elapsedTime'),
+  nextPlaying: $('nextPlaying'),
+  nextTitle: $('nextTitle'),
+  nextElapsedTime: $('nextElapsedTime')
 }
 
 async function fetchPreviewState() {
@@ -42,8 +45,15 @@ function renderCurrent(state) {
   dom.badge.dataset.position = settings.position
   dom.currentThumbnail.src = state.current.thumbnail
   dom.currentTitle.textContent = state.current.title
-  dom.currentChannel.textContent = state.current.channelTitle
   dom.currentRequester.textContent = `@${state.current.requestedBy}`
+
+  if (state.nextTrack) {
+    dom.nextTitle.textContent = state.nextTrack.title
+    dom.nextElapsedTime.textContent = formatDuration(Math.floor(state.nextTrack.duration))
+    dom.nextPlaying.classList.add('visible')
+  } else {
+    dom.nextPlaying.classList.remove('visible')
+  }
 
   dom.badge.classList.add('visible')
 }
@@ -81,7 +91,7 @@ function renderState(state) {
 function updateProgress() {
   if (!player || !currentState?.current) {
     dom.progressBar.style.width = '0%'
-    dom.elapsedTime.textContent = formatDuration(0)
+    dom.elapsedTime.textContent = '0:00 / 0:00'
     return
   }
 
@@ -130,7 +140,7 @@ function onPlayerError(event) {
     isTransitioning = true
 
     fetch('/api/player/skip', { method: 'POST' })
-      .then(() => fetchState())
+      .then(() => fetchPreviewState())
       .finally(() => {
         setTimeout(() => {
           isTransitioning = false

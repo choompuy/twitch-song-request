@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createFileStore } from '../persist.js'
 import { CacheFile, Song } from '../types.js'
 
 const DATA_DIR = join(process.cwd(), 'cache')
 const CACHE_FILE = join(DATA_DIR, 'youtube-cache.json')
-const CACHE_TMP_FILE = `${CACHE_FILE}.tmp`
+const store = createFileStore(CACHE_FILE)
 
 export const CACHE_LIMITS = {
   VIDEO_CACHE_TTL: 10 * 60 * 1000,
@@ -14,11 +14,6 @@ export const CACHE_LIMITS = {
 }
 
 const SWEEP_INTERVAL = 60 * 60 * 1000
-const SAVE_DEBOUNCE_MS = 250
-
-let cache = loadCache()
-let saveTimer: ReturnType<typeof setTimeout> | null = null
-let saveChain: Promise<void> = Promise.resolve()
 
 function getQuotaDate(): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -64,26 +59,13 @@ function loadCache(): CacheFile {
   }
 }
 
-async function persistCacheNow(): Promise<void> {
-  if (!existsSync(DATA_DIR)) {
-    mkdirSync(DATA_DIR, { recursive: true })
-  }
+let cache = loadCache()
 
-  await writeFile(CACHE_TMP_FILE, JSON.stringify(cache), 'utf8')
-  await rename(CACHE_TMP_FILE, CACHE_FILE)
-}
-
-function scheduleSave(): void {
-  if (saveTimer) {
-    clearTimeout(saveTimer)
-  }
-
-  saveTimer = setTimeout(() => {
-    saveTimer = null
-    saveChain = saveChain.then(persistCacheNow).catch((error) => {
-      console.error('[CACHE] Failed to save cache:', error instanceof Error ? error.message : error)
-    })
-  }, SAVE_DEBOUNCE_MS)
+function saveCache(): void {
+  store.scheduleSave(
+    () => cache,
+    (error) => console.error('[CACHE] Failed to save cache:', error instanceof Error ? error.message : error)
+  )
 }
 
 function sweepExpired(): void {
@@ -105,7 +87,7 @@ function sweepExpired(): void {
   }
 
   if (hasChanges) {
-    scheduleSave()
+    saveCache()
   }
 }
 
@@ -119,7 +101,7 @@ function resetQuotaIfNeeded(): void {
   }
 
   cache.quota = { date: today, searches: 0 }
-  scheduleSave()
+  saveCache()
 }
 
 export function getSearchCache(query: string): Song[] | null {
@@ -138,7 +120,7 @@ export function setSearchCache(query: string, results: Song[]): void {
     expiresAt: Date.now() + CACHE_LIMITS.SEARCH_CACHE_TTL
   }
 
-  scheduleSave()
+  saveCache()
 }
 
 export function getVideoCache(videoId: string): Song | null | undefined {
@@ -157,7 +139,7 @@ export function setVideoCache(videoId: string, song: Song | null): void {
     expiresAt: Date.now() + CACHE_LIMITS.VIDEO_CACHE_TTL
   }
 
-  scheduleSave()
+  saveCache()
 }
 
 export function canSearch(): boolean {
@@ -168,6 +150,6 @@ export function canSearch(): boolean {
 export function consumeSearchQuota(): void {
   resetQuotaIfNeeded()
   cache.quota.searches += 1
-  scheduleSave()
+  saveCache()
   console.log(`[QUOTA] Search usage: ${cache.quota.searches}/${CACHE_LIMITS.MAX_DAILY_SEARCHES}`)
 }

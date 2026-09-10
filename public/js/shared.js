@@ -27,8 +27,8 @@ function formatViews(views) {
 }
 
 function createLogger(prefix) {
-  return function (message) {
-    console.log(`[${prefix}] ${message}`)
+  return function (...args) {
+    console.log(`[${prefix}]`, ...args)
   }
 }
 

@@ -1,12 +1,10 @@
 import path from 'node:path'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { rename, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { createFileStore } from './persist.js'
 import { Config } from './types.js'
 
-const CONFIG_DIR = 'data'
-const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json')
-const CONFIG_TMP_PATH = `${CONFIG_PATH}.tmp`
-const SAVE_DEBOUNCE_MS = 250
+const CONFIG_PATH = path.join('data', 'config.json')
+const store = createFileStore(CONFIG_PATH)
 
 const envDefaults: Config = {
   minViews: 10000,
@@ -36,50 +34,51 @@ function loadFromDisk(): Config | null {
 }
 
 let config: Config = loadFromDisk() ?? { ...envDefaults }
-let saveTimer: ReturnType<typeof setTimeout> | null = null
-let saveChain: Promise<void> = Promise.resolve()
 
-async function persistConfigNow(): Promise<void> {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true })
-  }
-
-  await writeFile(CONFIG_TMP_PATH, JSON.stringify(config, null, 2), 'utf8')
-  await rename(CONFIG_TMP_PATH, CONFIG_PATH)
-}
-
-function scheduleSave(): void {
-  if (saveTimer) {
-    clearTimeout(saveTimer)
-  }
-
-  saveTimer = setTimeout(() => {
-    saveTimer = null
-    saveChain = saveChain.then(persistConfigNow).catch((error) => {
-      console.error('[CONFIG] Failed to save config:', error instanceof Error ? error.message : error)
-    })
-  }, SAVE_DEBOUNCE_MS)
+function saveConfig(): void {
+  store.scheduleSave(
+    () => config,
+    (error) => console.error('[CONFIG] Failed to save config:', error instanceof Error ? error.message : error)
+  )
 }
 
 export async function flushConfig(): Promise<void> {
-  if (saveTimer) {
-    clearTimeout(saveTimer)
-    saveTimer = null
-    saveChain = saveChain.then(persistConfigNow)
-  }
-  await saveChain
+  await store.flush(() => config)
 }
 
 export function getConfig(): Config {
   return { ...config }
 }
 
+const NUMERIC_FIELDS: { key: keyof Config; min: number }[] = [
+  { key: 'minViews', min: 0 },
+  { key: 'minDurationSeconds', min: 0 },
+  { key: 'maxDurationSeconds', min: 1 },
+  { key: 'maxQueueSize', min: 1 },
+  { key: 'maxRequestsPerUser', min: 0 }
+]
+
+function sanitizeNumericUpdates(updates: Partial<Config>): Partial<Config> {
+  const clean: Partial<Config> = { ...updates }
+
+  for (const { key, min } of NUMERIC_FIELDS) {
+    const value = updates[key]
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < min) {
+      delete clean[key]
+    }
+  }
+
+  return clean
+}
+
 export function updateConfig(updates: Partial<Config>): Config {
+  const safeUpdates = sanitizeNumericUpdates(updates)
+
   config = {
     ...config,
-    ...updates,
+    ...safeUpdates,
     fallbackPlaylist: { ...config.fallbackPlaylist, ...updates.fallbackPlaylist }
   }
-  scheduleSave()
+  saveConfig()
   return { ...config }
 }

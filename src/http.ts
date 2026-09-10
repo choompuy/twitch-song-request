@@ -1,5 +1,5 @@
 import { Response } from 'express'
-import { AppError, AppErrorCode, ApiResult, ApiOk, ApiError } from './types.js'
+import { AppError, AppErrorCode, ApiOk, ApiError } from './types.js'
 
 export function ok<T extends object>(res: Response, data: T, status = 200): void {
   const body: ApiOk<T> = { success: true, ...data }

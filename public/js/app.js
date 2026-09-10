@@ -1,5 +1,6 @@
 const log = createLogger('CONTROL')
 
+let activeTab = 'stream'
 let player = null
 let playerReady = false
 
@@ -79,6 +80,16 @@ const CONFIG_FIELDS = [
 
 const YOUTUBE_URL_PATTERN =
   /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/
+
+function switchTab(tabName) {
+  activeTab = tabName
+  document.querySelectorAll('.tab').forEach((el) => {
+    el.classList.toggle('active', el.dataset.tab === tabName)
+  })
+  document.querySelectorAll('.btn-tab').forEach((el) => {
+    el.classList.toggle('active', el.dataset.tabTarget === tabName)
+  })
+}
 
 async function request(url, options = {}) {
   const response = await fetch(url, {
@@ -354,6 +365,7 @@ function renderQueue() {
 
   if (!state.queue.length) {
     dom.queueList.innerHTML = '<div class="empty">Queue is empty</div>'
+    lastQueueKey = ''
     return
   }
 
@@ -365,26 +377,12 @@ function renderQueue() {
         <div class="row-wrapper" data-queue-index="${index}">
           <div class="row flex-1">
             <span class="text-secondary">#${index + 1}</span>
-
-            <img
-              src="${escapeHtml(item.thumbnail)}"
-              class="thumbnail-img"
-              alt="${escapeHtml(item.title)}"
-            >
-
+            <img src="${escapeHtml(item.thumbnail)}" class="thumbnail" alt="${escapeHtml(item.title)}">
             <div class="row-info">
-              <div class="row-title text-sm text-primary">
-                ${escapeHtml(item.title)}
-              </div>
-
-              <div class="text-xs text-green">
-                @${escapeHtml(item.requestedBy)}
-              </div>
+              <div class="row-title text-sm text-primary">${escapeHtml(item.title)}</div>
+              <div class="text-xs text-green">@${escapeHtml(item.requestedBy)}</div>
             </div>
-
-            <span class="text-sm text-secondary">
-              ${formatDuration(item.duration)}
-            </span>
+            <span class="text-sm text-secondary">${formatDuration(item.duration)}</span>
           </div>
 
           <button
@@ -500,32 +498,14 @@ function renderSearchResults(results) {
   dom.searchResults.innerHTML = results
     .map(
       (song) => `
-        <div
-          class="row-wrapper row-hover"
-          data-action="add"
-          data-video-id="${escapeHtml(song.videoId)}"
-        >
-          <img
-            src="${escapeHtml(song.thumbnail)}"
-            class="thumbnail-img"
-            alt="${escapeHtml(song.title)}"
-          >
-
+        <div class="row-wrapper row-hover" data-action="add" data-video-id="${escapeHtml(song.videoId)}">
+          <img src="${escapeHtml(song.thumbnail)}" class="thumbnail" alt="${escapeHtml(song.title)}">
           <div class="row-info">
-            <div class="row-title text-sm text-primary">
-              ${escapeHtml(song.title)}
-            </div>
-
-            <div class="row-sub text-xs text-secondary">
-              ${escapeHtml(song.channelTitle)}
-              • ${formatDuration(song.duration)}
-              • ${formatViews(song.views)} views
-            </div>
+            <div class="row-title text-sm text-primary">${escapeHtml(song.title)}</div>
+            <div class="text-xs text-secondary">${escapeHtml(song.channelTitle)}</div>
           </div>
-
-          <div class="row-tag">
-            ${PLUS_ICON}
-          </div>
+          <span class="text-sm text-secondary">${formatDuration(song.duration)}</span>
+          <div class="row-tag">${PLUS_ICON}</div>
         </div>
       `
     )
@@ -584,15 +564,18 @@ async function refreshFallbackState() {
   }
 }
 
+let lastFallbackKey = ''
+
 function renderFallback() {
   const data = state.fallback
 
   if (!data?.upNext?.length) {
     dom.fallbackInfo.innerHTML = ''
-    dom.fallbackList.innerHTML = '<div class="empty">Fallback is empty</div>'
+    dom.fallbackList.innerHTML = '<div class="panel-padding empty">Fallback is empty</div>'
     dom.fallbackShuffleBtn.classList.remove('active')
     dom.fallbackRepeatBtn.classList.remove('active')
     dom.fallbackEnabledToggle.checked = false
+    lastFallbackKey = ''
     return
   }
 
@@ -611,6 +594,11 @@ function renderFallback() {
   dom.fallbackRepeatBtn.classList.toggle('active', data.repeat)
   dom.fallbackEnabledToggle.checked = data.enabled
   dom.fallbackInfo.textContent = `${data.upNext.length} треков · обновлён ${formattedDate}`
+
+  const fallbackKey = `${data.activeVideoId}|${data.upNext.map((t) => `${t.videoId}:${t.isPlayed}`).join(',')}`
+  if (fallbackKey === lastFallbackKey) return
+  lastFallbackKey = fallbackKey
+
   dom.fallbackList.innerHTML = data.upNext
     .map((track) => {
       const isActive = track.videoId === data.activeVideoId
@@ -619,25 +607,12 @@ function renderFallback() {
       return `
         <div class="row-wrapper ${rowClass}">
           <div class="row flex-1">
-            <img
-              src="${escapeHtml(track.thumbnail)}"
-              class="thumbnail-img"
-              alt="${escapeHtml(track.title)}"
-            >
-
+            <img src="${escapeHtml(track.thumbnail)}" class="thumbnail" alt="${escapeHtml(track.title)}">
             <div class="row-info">
-              <div class="row-title text-sm text-primary">
-                ${escapeHtml(track.title)}
-              </div>
-
-              <div class="row-sub text-xs text-secondary">
-                ${escapeHtml(track.channelTitle)}
-              </div>
+              <div class="row-title text-sm text-primary">${escapeHtml(track.title)}</div>
+              <div class="text-xs text-secondary">${escapeHtml(track.channelTitle)}</div>
             </div>
-
-            <div>
-              ${formatDuration(track.duration)}
-            </div>
+            <span class="text-sm text-secondary">${formatDuration(track.duration)}</span>
           </div>
         </div>
       `
@@ -683,6 +658,12 @@ async function toggleFallbackEnabled() {
     log('Failed to toggle enabled:', error)
   }
 }
+
+document.querySelectorAll('.btn-tab').forEach((el) => {
+  el.addEventListener('click', (event) => {
+    switchTab(el.dataset.tabTarget)
+  })
+})
 
 dom.searchInput?.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {

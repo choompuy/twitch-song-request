@@ -100,6 +100,8 @@ function isValidVideoId(value: string | null | undefined): value is string {
   return Boolean(value && /^[a-zA-Z0-9_-]{11}$/.test(value))
 }
 
+const PLAYLIST_ID_PATTERN = /^(PL|UU|LL|FL|OL|RD)[A-Za-z0-9_-]{16,}$/
+
 function parsePlaylistId(input: string): string | null {
   const trimmed = input.trim()
 
@@ -111,13 +113,14 @@ function parsePlaylistId(input: string): string | null {
     const url = new URL(trimmed)
     const listParam = url.searchParams.get('list')
     if (listParam) {
-      return listParam
+      return PLAYLIST_ID_PATTERN.test(listParam) ? listParam : null
     }
+    return null
   } catch {
-    // не URL - считаем, что это уже голый ID, пропускаем дальше
+    // не URL - считаем, что это уже голый ID
   }
 
-  return trimmed
+  return PLAYLIST_ID_PATTERN.test(trimmed) ? trimmed : null
 }
 
 app.get('/preview', (_req, res) => {
@@ -152,9 +155,16 @@ app.put('/api/config', async (req, res) => {
   const body = { ...(req.body ?? {}) }
 
   if (body.fallbackPlaylist && typeof body.fallbackPlaylist.playlistId === 'string') {
-    body.fallbackPlaylist = {
-      ...body.fallbackPlaylist,
-      playlistId: parsePlaylistId(body.fallbackPlaylist.playlistId) || null
+    const rawPlaylistId = body.fallbackPlaylist.playlistId.trim()
+
+    if (rawPlaylistId) {
+      const parsedId = parsePlaylistId(rawPlaylistId)
+      if (!parsedId) {
+        return fail(res, 'некорректный ID или ссылка на плейлист', 'INVALID_PLAYLIST_ID', 400)
+      }
+      body.fallbackPlaylist = { ...body.fallbackPlaylist, playlistId: parsedId }
+    } else {
+      body.fallbackPlaylist = { ...body.fallbackPlaylist, playlistId: null }
     }
   }
 

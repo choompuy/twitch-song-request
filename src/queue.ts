@@ -1,27 +1,33 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { getConfig, updateConfig } from './config.js'
 import { getSettings, setSettings } from './settings.js'
 import { fetchPlaylistSongs } from './youtube/index.js'
-import { Settings, QueueItem, Song, PlayerState, FallbackStateResponse, FallbackTrackView, NextTrackView } from './types.js'
+import { createFileStore } from './persist.js'
+import { Settings, QueueItem, Song, PlayerState, FallbackStateResponse, FallbackTrackView, NextTrackView, AppError } from './types.js'
 
 type StateFile = {
   current: QueueItem | null
   queue: QueueItem[]
   settings: Settings
+  fallback: {
+    sourceTracks: Song[]
+    order: string[]
+    cursor: number
+    playlistId: string | null
+    lastRefreshedAt: number | null
+  }
 }
 
 const DATA_DIR = join(process.cwd(), 'cache')
 const STATE_FILE = join(DATA_DIR, 'queue-state.json')
-const STATE_TMP_FILE = `${STATE_FILE}.tmp`
-
-const SAVE_DEBOUNCE_MS = 250
+const store = createFileStore(STATE_FILE)
 
 let currentSong: QueueItem | null = null
 const queue: QueueItem[] = []
 const queueVideoIds = new Set<string>()
+const userQueueCounts = new Map<string, number>()
 
 let isPaused = false
 
@@ -32,9 +38,6 @@ let loadedFallbackPlaylistId: string | null = null
 let lastFallbackRefreshAt: number | null = null
 
 const userLastRequestTime = new Map<string, number>()
-
-let saveTimer: ReturnType<typeof setTimeout> | null = null
-let saveChain: Promise<void> = Promise.resolve()
 
 function log(message: string): void {
   console.log(`[QUEUE] ${message}`)
@@ -60,14 +63,24 @@ function loadState(): void {
     if (Array.isArray(data.queue)) {
       queue.length = 0
       queueVideoIds.clear()
+      userQueueCounts.clear()
       for (const item of data.queue) {
         queue.push(item)
         queueVideoIds.add(item.videoId)
+        incUserCount(item.requestedBy)
       }
     }
 
     if (data.settings) {
       setSettings(data.settings)
+    }
+
+    if (data.fallback) {
+      fallbackSourceTracks = data.fallback.sourceTracks ?? []
+      fallbackOrder = data.fallback.order ?? []
+      fallbackCursor = data.fallback.cursor ?? -1
+      loadedFallbackPlaylistId = data.fallback.playlistId ?? null
+      lastFallbackRefreshAt = data.fallback.lastRefreshedAt ?? null
     }
 
     log('State loaded from disk')
@@ -76,41 +89,29 @@ function loadState(): void {
   }
 }
 
-async function persistStateNow(): Promise<void> {
-  if (!existsSync(DATA_DIR)) {
-    mkdirSync(DATA_DIR, { recursive: true })
-  }
-
-  const state: StateFile = {
+function stateSnapshot(): StateFile {
+  return {
     current: currentSong,
     queue: [...queue],
-    settings: getSettings()
+    settings: getSettings(),
+    fallback: {
+      sourceTracks: fallbackSourceTracks,
+      order: fallbackOrder,
+      cursor: fallbackCursor,
+      playlistId: loadedFallbackPlaylistId,
+      lastRefreshedAt: lastFallbackRefreshAt
+    }
   }
-
-  await writeFile(STATE_TMP_FILE, JSON.stringify(state), 'utf8')
-  await rename(STATE_TMP_FILE, STATE_FILE)
 }
 
 function saveState(): void {
-  if (saveTimer) {
-    clearTimeout(saveTimer)
-  }
-
-  saveTimer = setTimeout(() => {
-    saveTimer = null
-    saveChain = saveChain.then(persistStateNow).catch((error) => {
-      console.error('[QUEUE] Failed to save state:', error instanceof Error ? error.message : error)
-    })
-  }, SAVE_DEBOUNCE_MS)
+  store.scheduleSave(stateSnapshot, (error) => {
+    console.error('[QUEUE] Failed to save state:', error instanceof Error ? error.message : error)
+  })
 }
 
 export async function flushQueueState(): Promise<void> {
-  if (saveTimer) {
-    clearTimeout(saveTimer)
-    saveTimer = null
-    saveChain = saveChain.then(persistStateNow)
-  }
-  await saveChain
+  await store.flush(stateSnapshot)
 }
 
 loadState()
@@ -158,6 +159,7 @@ export async function refreshFallback(): Promise<FallbackStateResponse> {
     fallbackCursor = -1
     loadedFallbackPlaylistId = null
     lastFallbackRefreshAt = null
+    saveState()
     return getFallbackState()
   }
 
@@ -196,6 +198,7 @@ export async function refreshFallback(): Promise<FallbackStateResponse> {
   lastFallbackRefreshAt = Date.now()
 
   log(`[FALLBACK] Loaded ${fallbackSourceTracks.length} tracks from playlist ${playlistId}`)
+  saveState()
   return getFallbackState()
 }
 
@@ -209,6 +212,7 @@ export function toggleFallbackShuffle(): FallbackStateResponse {
   fallbackCursor = activeId ? fallbackOrder.indexOf(activeId) : -1
 
   log(`[FALLBACK] Shuffle: ${shuffleOn}`)
+  saveState()
   return getFallbackState()
 }
 
@@ -318,7 +322,7 @@ function nextFallbackTrack(): QueueItem | null {
 
   if (nextIndex >= fallbackOrder.length) {
     if (!config.fallbackPlaylist.repeat) {
-      fallbackCursor = fallbackOrder.length + 1
+      fallbackCursor = fallbackOrder.length
       return null
     }
     fallbackCursor = 0
@@ -335,9 +339,23 @@ function nextFallbackTrack(): QueueItem | null {
   return toFallbackQueueItem(song)
 }
 
+function incUserCount(requestedBy: string): void {
+  const key = requestedBy.toLowerCase()
+  userQueueCounts.set(key, (userQueueCounts.get(key) ?? 0) + 1)
+}
+
+function decUserCount(requestedBy: string): void {
+  const key = requestedBy.toLowerCase()
+  const count = (userQueueCounts.get(key) ?? 0) - 1
+  if (count > 0) {
+    userQueueCounts.set(key, count)
+  } else {
+    userQueueCounts.delete(key)
+  }
+}
+
 function getUserActiveCount(username: string): number {
-  const normalized = username.toLowerCase()
-  return queue.filter((item) => item.requestedBy.toLowerCase() === normalized).length
+  return userQueueCounts.get(username.toLowerCase()) ?? 0
 }
 
 export function getState(): PlayerState & { nextTrack: NextTrackView | null } {
@@ -370,20 +388,23 @@ function assertCanAddSong(song: Song, requestedBy: string, addToQueue: boolean, 
   const normalized = requestedBy.toLowerCase()
 
   if (currentSong?.videoId === song.videoId && !currentSong.isFallback) {
-    throw new Error('этот трек уже находится в очереди')
+    throw new AppError('DUPLICATE', 'этот трек уже находится в очереди')
   }
 
   if (queueVideoIds.has(song.videoId)) {
-    throw new Error('этот трек уже находится в очереди')
+    throw new AppError('DUPLICATE', 'этот трек уже находится в очереди')
   }
 
   if (addToQueue && queue.length >= config.maxQueueSize) {
-    throw new Error('очередь заполнена')
+    throw new AppError('QUEUE_FULL', 'очередь заполнена')
   }
 
   const activeCount = getUserActiveCount(normalized)
   if (config.maxRequestsPerUser > 0 && activeCount >= config.maxRequestsPerUser) {
-    throw new Error(`вы можете заказать только ${config.maxRequestsPerUser} трек${config.maxRequestsPerUser > 1 ? 'а' : ''} одновременно`)
+    throw new AppError(
+      'USER_LIMIT',
+      `вы можете заказать только ${config.maxRequestsPerUser} трек${config.maxRequestsPerUser > 1 ? 'а' : ''} одновременно`
+    )
   }
 }
 
@@ -404,6 +425,7 @@ export function addSong(song: Song, requestedBy: string, addToQueue: boolean = t
   if (addToQueue) {
     queue.push(item)
     queueVideoIds.add(item.videoId)
+    incUserCount(requestedBy)
     log(`[QUEUE] added "${song.title}" at position ${queue.length}`)
   } else {
     log(`[QUEUE] "${song.title}" will be set as current (not added to queue)`)
@@ -431,6 +453,7 @@ export function moveToNext(): QueueItem | null {
 
   if (next) {
     queueVideoIds.delete(next.videoId)
+    decUserCount(next.requestedBy)
     setCurrent(next)
     log(`[PLAYER] moved to next: "${next.title}"`)
   } else {
@@ -453,6 +476,7 @@ export function removeAt(index: number): QueueItem | null {
 
   if (item) {
     queueVideoIds.delete(item.videoId)
+    decUserCount(item.requestedBy)
     log(`[QUEUE] removed "${item.title}" at position ${index + 1}`)
   }
 
@@ -465,6 +489,7 @@ export function clearQueue(): QueueItem[] {
   const cleared = [...queue]
   queue.length = 0
   queueVideoIds.clear()
+  userQueueCounts.clear()
 
   log(`[QUEUE] cleared ${cleared.length} songs`)
 

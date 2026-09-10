@@ -8,26 +8,33 @@
   </head>
   <body>
     <div class="container">
-      <div class="now-playing-badge" id="nowPlaying">
-        <div class="row">
-          <img class="thumbnail" id="currentThumbnail" alt="" />
-          <div class="text">
-            <div class="title text-md" id="currentTitle"></div>
-            <div class="text-sm text-secondary" id="currentChannel"></div>
-            <div class="text-sm text-green" id="currentRequester"></div>
+      <div class="badge">
+        <div class="now-playing-badge box-shadow" id="nowPlaying">
+          <div class="now-playing">
+            <img class="thumbnail" id="currentThumbnail" alt="" />
+            <div class="text">
+              <div class="title text-md truncate" id="currentTitle"></div>
+              <div class="text-sm text-green truncate" id="currentRequester"></div>
+              <div class="progress-wrapper">
+                <div class="progress">
+                  <div id="progressBar"></div>
+                </div>
+                <div class="time text-sm text-secondary">
+                  <div id="elapsedTime">0:00 / 0:00</div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-        <div class="progress-wrapper">
-          <div class="progress">
-            <div id="progressBar"></div>
-          </div>
-          <div class="time text-sm text-secondary">
-            <div id="elapsedTime">0:00</div>
+
+          <div class="next-playing" id="nextPlaying">
+            <div class="prefix text-secondary text-sm">NEXT</div>
+            <div class="marquee-text flex-1 text-secondary text-sm truncate" id="nextTitle"></div>
+            <div class="text-secondary text-sm" id="nextElapsedTime">0:00</div>
           </div>
         </div>
       </div>
 
-      <div class="player-wrapper hidden" id="playerWrapper">
+      <div class="player-wrapper box-shadow hidden" id="playerWrapper">
         <div id="player"></div>
       </div>
     </div>

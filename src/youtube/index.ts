@@ -1,4 +1,4 @@
-import { Song } from '../types.js'
+import { Song, AppError } from '../types.js'
 import { youtube, videoToSong, isValidSong } from './client.js'
 import { normalize, combinedScore, formatViews } from './scoring.js'
 import { getSearchCache, setSearchCache, getVideoCache, setVideoCache, canSearch, consumeSearchQuota, CACHE_LIMITS } from './cache.js'
@@ -63,10 +63,10 @@ async function fetchVideoById(videoId: string): Promise<Song | null> {
     console.error('[ERROR] YouTube API:', error instanceof Error ? error.message : error)
 
     if (error instanceof Error && error.message === 'YouTube API quota exceeded') {
-      throw new Error('лимит YouTube API исчерпан')
+      throw new AppError('YOUTUBE_QUOTA', 'лимит YouTube API исчерпан')
     }
 
-    throw new Error('не удалось получить видео с YouTube')
+    throw new AppError('YOUTUBE_ERROR', 'не удалось получить видео с YouTube')
   }
 }
 
@@ -88,7 +88,7 @@ export async function searchSongs(query: string): Promise<Song[]> {
 
   if (!canSearch()) {
     console.warn(`[QUOTA] Daily search limit reached: ${CACHE_LIMITS.MAX_DAILY_SEARCHES}`)
-    throw new Error('дневной лимит поиска YouTube исчерпан, используйте ссылку.')
+    throw new AppError('YOUTUBE_QUOTA', 'дневной лимит поиска YouTube исчерпан, используйте ссылку.')
   }
 
   return dedupInFlight(pendingSearches, normalizedQuery, () => performSearch(normalizedQuery))
@@ -136,10 +136,10 @@ async function performSearch(query: string): Promise<Song[]> {
     console.error('[ERROR] YouTube search:', error instanceof Error ? error.message : error)
 
     if (error instanceof Error && error.message === 'YouTube API quota exceeded') {
-      throw new Error('лимит YouTube API исчерпан. Попробуйте позже или используйте YouTube-ссылку.')
+      throw new AppError('YOUTUBE_QUOTA', 'лимит YouTube API исчерпан. Попробуйте позже или используйте YouTube-ссылку.')
     }
 
-    throw new Error('не удалось выполнить поиск YouTube')
+    throw new AppError('YOUTUBE_ERROR', 'не удалось выполнить поиск YouTube')
   }
 }
 

@@ -1,11 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { createFileStore } from './persist.js'
 
 export type Secrets = {
   youtubeApiKey: string
 }
 
 const SECRETS_PATH = path.join('data', 'secrets.json')
+const store = createFileStore(SECRETS_PATH)
 
 function loadFromDisk(): Secrets | null {
   try {
@@ -29,8 +31,10 @@ export function updateSecrets(updates: Partial<Secrets>): Secrets {
   }
 
   secrets = next
-  fs.mkdirSync(path.dirname(SECRETS_PATH), { recursive: true })
-  fs.writeFileSync(SECRETS_PATH, JSON.stringify(secrets, null, 2))
+  store.scheduleSave(
+    () => secrets,
+    (error) => console.error('[SECRETS] Failed to save:', error instanceof Error ? error.message : error)
+  )
 
   return { ...secrets }
 }
