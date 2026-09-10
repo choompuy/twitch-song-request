@@ -5,7 +5,7 @@ import { getConfig, updateConfig } from './config.js'
 import { getSettings, setSettings } from './settings.js'
 import { fetchPlaylistSongs } from './youtube/index.js'
 import { createFileStore } from './persist.js'
-import { Settings, QueueItem, Song, PlayerState, FallbackStateResponse, FallbackTrackView, NextTrackView, AppError } from './types.js'
+import { Settings, QueueItem, Song, PlayerState, FallbackStateResponse, FallbackTrackView, AppError } from './types.js'
 
 type StateFile = {
   current: QueueItem | null
@@ -36,8 +36,6 @@ let fallbackOrder: string[] = []
 let fallbackCursor = -1
 let loadedFallbackPlaylistId: string | null = null
 let lastFallbackRefreshAt: number | null = null
-
-const userLastRequestTime = new Map<string, number>()
 
 function log(message: string): void {
   console.log(`[QUEUE] ${message}`)
@@ -108,10 +106,6 @@ function saveState(): void {
   store.scheduleSave(stateSnapshot, (error) => {
     console.error('[QUEUE] Failed to save state:', error instanceof Error ? error.message : error)
   })
-}
-
-export async function flushQueueState(): Promise<void> {
-  await store.flush(stateSnapshot)
 }
 
 loadState()
@@ -247,35 +241,17 @@ export function getFallbackState(): FallbackStateResponse {
       .map((videoId, index) => {
         const track = findTrack(videoId)
         if (!track) return null
-        return { ...pickTrackView(track), isPlayed: index < fallbackCursor }
+        return { ...track, isPlayed: index < fallbackCursor }
       })
       .filter((track): track is FallbackTrackView => track !== null)
   }
 }
 
-function pickTrackView(track: Song): Pick<Song, 'videoId' | 'title' | 'channelTitle' | 'thumbnail' | 'duration'> {
-  return {
-    videoId: track.videoId,
-    title: track.title,
-    channelTitle: track.channelTitle,
-    thumbnail: track.thumbnail,
-    duration: track.duration
-  }
-}
-
-export function getNextTrack(): NextTrackView | null {
+export function getNextTrack(): QueueItem | null {
   const queued = queue[0]
 
   if (queued) {
-    return {
-      source: 'queue',
-      videoId: queued.videoId,
-      title: queued.title,
-      channelTitle: queued.channelTitle,
-      thumbnail: queued.thumbnail,
-      requestedBy: queued.requestedBy,
-      duration: queued.duration
-    }
+    return queued
   }
 
   const config = getConfig()
@@ -293,25 +269,17 @@ export function getNextTrack(): NextTrackView | null {
     return null
   }
 
-  return {
-    source: 'fallback',
-    videoId: upcoming.videoId,
-    title: upcoming.title,
-    channelTitle: upcoming.channelTitle,
-    thumbnail: upcoming.thumbnail,
-    requestedBy: null,
-    duration: upcoming.duration
-  }
+  return { ...upcoming, requestedBy: 'Jam', isFallback: true }
 }
 
 function toFallbackQueueItem(song: Song): QueueItem {
   return {
     ...song,
     requestedBy: 'Jam',
-    addedAt: Date.now(),
     isFallback: true
   }
 }
+
 function nextFallbackTrack(): QueueItem | null {
   const config = getConfig()
   if (!config.fallbackPlaylist.enabled || !fallbackOrder.length) {
@@ -358,7 +326,7 @@ function getUserActiveCount(username: string): number {
   return userQueueCounts.get(username.toLowerCase()) ?? 0
 }
 
-export function getState(): PlayerState & { nextTrack: NextTrackView | null } {
+export function getState(): PlayerState & { nextTrack: QueueItem | null } {
   return {
     current: currentSong,
     queue: [...queue],
@@ -383,7 +351,7 @@ export function getIsPaused(): boolean {
   return isPaused
 }
 
-function assertCanAddSong(song: Song, requestedBy: string, addToQueue: boolean, now: number): void {
+function assertCanAddSong(song: Song, requestedBy: string, addToQueue: boolean): void {
   const config = getConfig()
   const normalized = requestedBy.toLowerCase()
 
@@ -409,17 +377,13 @@ function assertCanAddSong(song: Song, requestedBy: string, addToQueue: boolean, 
 }
 
 export function addSong(song: Song, requestedBy: string, addToQueue: boolean = true): QueueItem {
-  const now = Date.now()
-
   log(`[REQUEST] ${requestedBy} → "${song.title}"`)
 
-  assertCanAddSong(song, requestedBy, addToQueue, now)
-  userLastRequestTime.set(requestedBy.toLowerCase(), now)
+  assertCanAddSong(song, requestedBy, addToQueue)
 
   const item: QueueItem = {
     ...song,
-    requestedBy,
-    addedAt: now
+    requestedBy
   }
 
   if (addToQueue) {

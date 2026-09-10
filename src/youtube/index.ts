@@ -94,6 +94,13 @@ export async function searchSongs(query: string): Promise<Song[]> {
   return dedupInFlight(pendingSearches, normalizedQuery, () => performSearch(normalizedQuery))
 }
 
+function mapValidSongs(videos: VideoItem[]): Song[] {
+  return videos
+    .map((video) => ({ video, song: videoToSong(video) }))
+    .filter(({ video, song }) => isValidSong(song, video))
+    .map(({ song }) => song)
+}
+
 async function performSearch(query: string): Promise<Song[]> {
   try {
     consumeSearchQuota()
@@ -122,10 +129,7 @@ async function performSearch(query: string): Promise<Song[]> {
       id: ids.join(',')
     })
 
-    const songs = (details.items ?? [])
-      .map((video) => ({ video, song: videoToSong(video) }))
-      .filter(({ video, song }) => isValidSong(song, video))
-      .map(({ song }) => song)
+    const songs = mapValidSongs(details.items ?? [])
 
     console.log(`[FILTER] ${songs.length} suitable results`)
     songs.sort((a, b) => combinedScore(b, query) - combinedScore(a, query))
@@ -182,10 +186,8 @@ async function performPlaylistFetch(playlistId: string): Promise<Song[]> {
       id: videoIds.join(',')
     })
 
-    const songs = (details.items ?? [])
-      .map((video) => ({ video, song: videoToSong(video) }))
-      .filter(({ video, song }) => isValidSong(song, video))
-      .map(({ song }) => song)
+    const songs = mapValidSongs(details.items ?? [])
+
     console.log(`[PLAYLIST] Fetched ${songs.length} valid songs from playlist: ${playlistId}`)
     return songs
   } catch (error) {

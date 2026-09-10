@@ -42,10 +42,6 @@ function saveConfig(): void {
   )
 }
 
-export async function flushConfig(): Promise<void> {
-  await store.flush(() => config)
-}
-
 export function getConfig(): Config {
   return { ...config }
 }

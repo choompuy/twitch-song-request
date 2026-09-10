@@ -26,3 +26,9 @@ const PAUSE_ICON = `
     <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5v14m8-14v14" />
   </svg>
 `
+
+const EMPTY = (text) => `
+  <div class="panel-padding">
+    <div class="empty">${text}</div>
+  </div>
+`

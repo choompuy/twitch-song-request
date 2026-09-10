@@ -31,14 +31,5 @@ export function createFileStore(filePath: string) {
     }, SAVE_DEBOUNCE_MS)
   }
 
-  async function flush(getData: () => unknown): Promise<void> {
-    if (saveTimer) {
-      clearTimeout(saveTimer)
-      saveTimer = null
-      saveChain = saveChain.then(() => persistNow(getData))
-    }
-    await saveChain
-  }
-
-  return { scheduleSave, flush }
+  return { scheduleSave }
 }

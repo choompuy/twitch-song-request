@@ -100,7 +100,7 @@ function isValidVideoId(value: string | null | undefined): value is string {
   return Boolean(value && /^[a-zA-Z0-9_-]{11}$/.test(value))
 }
 
-const PLAYLIST_ID_PATTERN = /^(PL|UU|LL|FL|OL|RD)[A-Za-z0-9_-]{16,}$/
+const PLAYLIST_ID_PATTERN = /^(PL|UU|LL|FL|OL|RD)[A-Za-z0-9_-]+$/
 
 function parsePlaylistId(input: string): string | null {
   const trimmed = input.trim()
@@ -112,6 +112,7 @@ function parsePlaylistId(input: string): string | null {
   try {
     const url = new URL(trimmed)
     const listParam = url.searchParams.get('list')
+    console.log(listParam)
     if (listParam) {
       return PLAYLIST_ID_PATTERN.test(listParam) ? listParam : null
     }
@@ -297,35 +298,19 @@ app.get('/api/fallback', (_req, res) => {
 })
 
 app.post('/api/fallback/refresh', async (_req, res) => {
-  try {
-    ok<FallbackStateResponse>(res, await refreshFallback())
-  } catch {
-    fail(res, 'не удалось обновить плейлист, проверь ID', 'FALLBACK_REFRESH_FAILED', 400)
-  }
+  ok<FallbackStateResponse>(res, await refreshFallback())
 })
 
 app.post('/api/fallback/shuffle', (_req, res) => {
-  try {
-    ok<FallbackStateResponse>(res, toggleFallbackShuffle())
-  } catch {
-    fail(res, 'не удалось изменить shuffle', 'FALLBACK_SHUFFLE_FAILED', 400)
-  }
+  ok<FallbackStateResponse>(res, toggleFallbackShuffle())
 })
 
 app.post('/api/fallback/repeat', (_req, res) => {
-  try {
-    ok<FallbackStateResponse>(res, toggleFallbackRepeat())
-  } catch {
-    fail(res, 'не удалось изменить repeat', 'FALLBACK_REPEAT_FAILED', 400)
-  }
+  ok<FallbackStateResponse>(res, toggleFallbackRepeat())
 })
 
 app.post('/api/fallback/enabled', (_req, res) => {
-  try {
-    ok<FallbackStateResponse>(res, toggleFallbackEnabled())
-  } catch {
-    fail(res, 'не удалось изменить состояние fallback', 'FALLBACK_ENABLED_FAILED', 400)
-  }
+  ok<FallbackStateResponse>(res, toggleFallbackEnabled())
 })
 
 app.delete('/api/queue/:index', (req, res) => {

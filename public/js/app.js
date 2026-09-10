@@ -82,13 +82,20 @@ const YOUTUBE_URL_PATTERN =
   /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/
 
 function switchTab(tabName) {
+  const wasStream = activeTab === 'stream'
   activeTab = tabName
+
   document.querySelectorAll('.tab').forEach((el) => {
     el.classList.toggle('active', el.dataset.tab === tabName)
   })
   document.querySelectorAll('.btn-tab').forEach((el) => {
     el.classList.toggle('active', el.dataset.tabTarget === tabName)
   })
+
+  if (!wasStream && tabName === 'stream') {
+    refreshState()
+    refreshFallbackState()
+  }
 }
 
 async function request(url, options = {}) {
@@ -297,6 +304,7 @@ async function saveConfigSetting() {
 async function refreshState() {
   try {
     const nextState = await api.getState()
+    const trackChanged = state.current?.videoId !== nextState.current?.videoId
 
     state.current = nextState.current
     state.queue = nextState.queue ?? []
@@ -304,6 +312,10 @@ async function refreshState() {
     state.nextTrack = nextState.nextTrack ?? null
 
     renderState()
+
+    if (trackChanged) {
+      await refreshFallbackState()
+    }
   } catch (error) {
     log('Error fetching state:', error)
   }
@@ -364,7 +376,7 @@ function renderQueue() {
   if (queueKey === lastQueueKey) return
 
   if (!state.queue.length) {
-    dom.queueList.innerHTML = '<div class="empty">Queue is empty</div>'
+    dom.queueList.innerHTML = EMPTY('Queue is empty')
     lastQueueKey = ''
     return
   }
@@ -423,6 +435,7 @@ function syncPlayer() {
 }
 
 function renderPlayPause() {
+  dom.playPauseBtn.title = state.isPaused ? 'Resume' : 'Pause'
   dom.playPauseBtn.innerHTML = state.isPaused ? PLAY_ICON : PAUSE_ICON
 }
 
@@ -571,7 +584,8 @@ function renderFallback() {
 
   if (!data?.upNext?.length) {
     dom.fallbackInfo.innerHTML = ''
-    dom.fallbackList.innerHTML = '<div class="panel-padding empty">Fallback is empty</div>'
+    dom.fallbackList.innerHTML = EMPTY('Fallback is empty')
+
     dom.fallbackShuffleBtn.classList.remove('active')
     dom.fallbackRepeatBtn.classList.remove('active')
     dom.fallbackEnabledToggle.checked = false
@@ -605,7 +619,7 @@ function renderFallback() {
       const rowClass = isActive ? 'row-active' : track.isPlayed ? 'row-played' : ''
 
       return `
-        <div class="row-wrapper ${rowClass}">
+        <div class="row-wrapper ${rowClass}" data-video-id="${escapeHtml(track.videoId)}">
           <div class="row flex-1">
             <img src="${escapeHtml(track.thumbnail)}" class="thumbnail" alt="${escapeHtml(track.title)}">
             <div class="row-info">
@@ -618,6 +632,18 @@ function renderFallback() {
       `
     })
     .join('')
+
+  const activeRow = dom.fallbackList.querySelector(`[data-video-id="${CSS.escape(data.activeVideoId)}"]`)
+
+  if (activeRow) {
+    const container = dom.fallbackList
+    const top = activeRow.offsetTop - container.offsetTop - (container.clientHeight - activeRow.offsetHeight) / 2
+
+    dom.fallbackList.scrollTo({
+      top: Math.max(0, top),
+      behavior: 'smooth'
+    })
+  }
 }
 
 async function refreshFallback() {
@@ -726,8 +752,13 @@ window.onYouTubeIframeAPIReady = () => {
 async function init() {
   await Promise.allSettled([loadSecrets(), loadConfig(), loadPreviewSettings(), refreshState(), refreshFallbackState()])
 
-  setInterval(refreshState, 2000)
-  setInterval(refreshFallbackState, 10000)
+  setInterval(() => {
+    if (activeTab === 'stream') refreshState()
+  }, 2000)
+
+  setInterval(() => {
+    if (activeTab === 'stream') refreshFallbackState()
+  }, 30000)
 
   log('Control panel initialized')
 }

@@ -38,7 +38,7 @@ main {
 
 .grid {
   display: grid;
-  grid-template-columns: 1fr 20rem;
+  grid-template-columns: 1fr 1fr;
   gap: 1rem;
 }
 
@@ -239,7 +239,6 @@ a {
 .row-list .row-hover:hover {
   background: var(--bg-hover);
   cursor: pointer;
-  transition: background ease 0.2s;
 }
 
 .row-list .row-played {

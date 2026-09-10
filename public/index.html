@@ -56,6 +56,25 @@
                   </div>
                 </div>
               </div>
+
+              <div class="row">
+                <button id="playPauseBtn" class="btn btn-icon" onclick="playPauseCurrent()" title="Pause">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
+                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5v14m8-14v14" />
+                  </svg>
+                </button>
+                <button class="btn btn-icon" onclick="skipCurrent()" title="Skip">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
+                    <path
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M17 5v14M7 7.329v9.342c0 1.066 0 1.599.218 1.872a1 1 0 0 0 .783.376c.35 0 .766-.333 1.599-.999l4.277-3.421c1.067-.854 1.601-1.281 1.794-1.797a2 2 0 0 0 0-1.404c-.193-.516-.727-.943-1.794-1.797L9.6 6.08C8.767 5.414 8.35 5.08 8 5.08a1 1 0 0 0-.783.377C7 5.73 7 6.263 7 7.329"
+                    />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             <div class="panel">
@@ -85,10 +104,25 @@
                 </div>
               </div>
               <div class="panel-content">
-                <div class="row-list panel-padding" id="queueList">
-                  <div class="empty">Queue is empty</div>
+                <div class="row-list" id="queueList">
+                  <div class="panel-padding">
+                    <div class="empty">Queue is empty</div>
+                  </div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div class="sidebar">
+            <div class="panel panel-padding">
+              <h2>Preview</h2>
+              <label class="row">
+                <div class="checkbox-wrapper">
+                  <input class="checkbox" type="checkbox" id="showVideo" onchange="savePreviewSettings()" />
+                </div>
+                Show video
+              </label>
+              <div class="preview-url">OBS URL: <a href="/preview" target="_blank">/preview</a></div>
             </div>
 
             <div class="panel">
@@ -139,43 +173,21 @@
                   </label>
                 </div>
               </div>
-              <div class="panel-content">
-                <div id="fallbackList" class="row-list"></div>
+              <div class="panel-content row-list" id="fallbackList">
+                <div class="panel-padding">
+                  <div class="empty">Fallback is empty</div>
+                </div>
               </div>
             </div>
           </div>
+        </div>
+      </section>
 
-          <div class="sidebar">
-            <div class="panel panel-padding">
-              <h2>Preview Settings</h2>
-              <label class="row">
-                <div class="checkbox-wrapper">
-                  <input class="checkbox" type="checkbox" id="showVideo" onchange="savePreviewSettings()" />
-                </div>
-                Показать видео
-              </label>
-              <div class="preview-url">OBS URL: <a href="/preview" target="_blank">/preview</a></div>
+      <section class="container tab" data-tab="playlists">Playlist</section>
 
-              <div class="row">
-                <button id="playPauseBtn" class="btn btn-icon" onclick="playPauseCurrent()">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
-                    <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5v14m8-14v14" />
-                  </svg>
-                </button>
-                <button class="btn btn-icon" onclick="skipCurrent()">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24">
-                    <path
-                      stroke="currentColor"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M17 5v14M7 7.329v9.342c0 1.066 0 1.599.218 1.872a1 1 0 0 0 .783.376c.35 0 .766-.333 1.599-.999l4.277-3.421c1.067-.854 1.601-1.281 1.794-1.797a2 2 0 0 0 0-1.404c-.193-.516-.727-.943-1.794-1.797L9.6 6.08C8.767 5.414 8.35 5.08 8 5.08a1 1 0 0 0-.783.377C7 5.73 7 6.263 7 7.329"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
+      <section class="container tab" data-tab="settings">
+        <div class="grid">
+          <div class="main">
             <div class="panel panel-padding">
               <h2>Bot Settings</h2>
               <div class="bot-settings">
@@ -216,14 +228,6 @@
             </div>
           </div>
         </div>
-      </section>
-
-      <section class="container tab" data-tab="playlists">
-        Playlist
-      </section>
-
-      <section class="container tab" data-tab="settings">
-        Settings
       </section>
     </main>
 
