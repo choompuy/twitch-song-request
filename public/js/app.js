@@ -1,6 +1,6 @@
 const log = createLogger('CONTROL')
 
-let activeTab = 'stream'
+let activeTab = 'dashboard'
 let player = null
 let playerReady = false
 
@@ -17,7 +17,8 @@ const state = {
   fallback: null,
   playlists: [],
   network: null,
-  selectedIp: null
+  selectedIp: null,
+  activity: []
 }
 
 const dom = {
@@ -32,7 +33,6 @@ const dom = {
   cfgMaxDuration: $('cfgMaxDuration'),
   cfgMaxQueue: $('cfgMaxQueue'),
   cfgMaxPerUser: $('cfgMaxPerUser'),
-  cfgFallbackPlaylist: $('cfgFallbackPlaylist'),
 
   secYoutubeKey: $('secYoutubeKey'),
   secretsStatus: $('secretsStatus'),
@@ -72,9 +72,16 @@ const dom = {
   fallbackEnabledToggle: $('fallbackEnabledToggle'),
 
   playlistUrlInput: $('playlistUrlInput'),
-  playlistNameInput: $('playlistNameInput'),
   playlistAddBtn: $('playlistAddBtn'),
-  playlistsList: $('playlistsList')
+  playlistsList: $('playlistsList'),
+  playlistsCount: $('playlistsCount'),
+  playlistError: $('playlistError'),
+
+  activityList: $('activityList'),
+  statQueueLength: $('statQueueLength'),
+  statAcceptedToday: $('statAcceptedToday'),
+  statRejectedToday: $('statRejectedToday'),
+  statFallbackCount: $('statFallbackCount')
 }
 
 const CONFIG_FIELDS = [
@@ -82,20 +89,14 @@ const CONFIG_FIELDS = [
   { key: 'minDurationSeconds', dom: 'cfgMinDuration', type: 'number' },
   { key: 'maxDurationSeconds', dom: 'cfgMaxDuration', type: 'number' },
   { key: 'maxQueueSize', dom: 'cfgMaxQueue', type: 'number' },
-  { key: 'maxRequestsPerUser', dom: 'cfgMaxPerUser', type: 'number' },
-  {
-    key: 'playlistId',
-    path: 'fallbackPlaylist',
-    dom: 'cfgFallbackPlaylist',
-    type: 'text'
-  }
+  { key: 'maxRequestsPerUser', dom: 'cfgMaxPerUser', type: 'number' }
 ]
 
 const YOUTUBE_URL_PATTERN =
   /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/
 
 function switchTab(tabName) {
-  const wasStream = activeTab === 'stream'
+  const wasStream = activeTab === 'dashboard'
   activeTab = tabName
 
   document.querySelectorAll('.tab').forEach((el) => {
@@ -105,7 +106,7 @@ function switchTab(tabName) {
     el.classList.toggle('active', el.dataset.tabTarget === tabName)
   })
 
-  if (!wasStream && tabName === 'stream') {
+  if (!wasStream && tabName === 'dashboard') {
     refreshState()
     refreshFallbackState()
   }
@@ -261,7 +262,66 @@ const api = {
   activatePlaylist: (id) =>
     request(`/api/playlists/${encodeURIComponent(id)}/activate`, {
       method: 'POST'
+    }),
+
+  getActivity: () => request('/api/activity')
+}
+
+async function loadActivity() {
+  try {
+    const data = await api.getActivity()
+    state.activity = data.entries ?? []
+    renderActivity()
+  } catch (error) {
+    log('Error loading activity:', error)
+  }
+}
+
+function timeAgo(timestamp) {
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ago`
+}
+
+function renderActivity() {
+  if (!dom.activityList) return
+
+  if (!state.activity.length) {
+    dom.activityList.innerHTML = EMPTY('No requests yet')
+    return
+  }
+
+  dom.activityList.innerHTML = state.activity
+    .map((entry) => {
+      const title = entry.title || entry.query
+      return `
+        <div class="row-wrapper">
+          <div class="row flex-1">
+            <div class="row-info">
+              <div class="row-title text-sm text-primary">${escapeHtml(title)}</div>
+              <div class="text-xs text-green">@${escapeHtml(entry.requestedBy)} · ${timeAgo(entry.at)}</div>
+              ${entry.reason ? `<div class="activity-reason">${escapeHtml(entry.reason)}</div>` : ''}
+            </div>
+          </div>
+          <span class="status-pill ${entry.status}">${entry.status}</span>
+        </div>
+      `
     })
+    .join('')
+}
+
+function renderStats() {
+  if (dom.statQueueLength) dom.statQueueLength.textContent = state.queue.length
+
+  const accepted = state.activity.filter((e) => e.status === 'accepted').length
+  const rejected = state.activity.filter((e) => e.status === 'rejected').length
+
+  if (dom.statAcceptedToday) dom.statAcceptedToday.textContent = accepted
+  if (dom.statRejectedToday) dom.statRejectedToday.textContent = rejected
+  if (dom.statFallbackCount) dom.statFallbackCount.textContent = state.fallback?.sourceCount ?? 0
 }
 
 async function loadPreviewSettings() {
@@ -433,6 +493,7 @@ function renderState() {
   renderNext()
   renderQueue()
   renderPlayPause()
+  renderStats()
 
   syncPlayer()
 }
@@ -640,6 +701,7 @@ async function addSong(query) {
 
     if (!result.success) {
       showSearchError(result.error || 'Error adding video')
+      await loadActivity()
       return
     }
 
@@ -647,9 +709,11 @@ async function addSong(query) {
     clearSearchResults()
 
     await refreshState()
+    await loadActivity()
   } catch (error) {
     log('Error adding song:', error)
     showSearchError(error.message || 'Error adding video')
+    await loadActivity()
   }
 }
 
@@ -697,6 +761,7 @@ function renderFallback() {
     dom.fallbackRepeatBtn.classList.remove('active')
     dom.fallbackEnabledToggle.checked = false
     lastFallbackKey = ''
+    renderStats()
     return
   }
 
@@ -715,6 +780,7 @@ function renderFallback() {
   dom.fallbackRepeatBtn.classList.toggle('active', data.repeat)
   dom.fallbackEnabledToggle.checked = data.enabled
   dom.fallbackInfo.textContent = `${data.upNext.length} треков · обновлён ${formattedDate}`
+  renderStats()
 
   const fallbackKey = `${data.activeVideoId}|${data.upNext.map((t) => `${t.videoId}:${t.isPlayed}`).join(',')}`
   if (fallbackKey === lastFallbackKey) return
@@ -822,6 +888,115 @@ dom.fallbackList?.addEventListener('click', (event) => {
   if (enqueueBtn) return enqueueFallbackTrack(enqueueBtn.dataset.videoId)
 })
 
+async function loadPlaylists() {
+  try {
+    const data = await api.getPlaylists()
+    state.playlists = data.playlists ?? []
+    renderPlaylists()
+  } catch (error) {
+    log('Error loading playlists:', error)
+  }
+}
+
+function renderPlaylists() {
+  if (!dom.playlistsList) return
+
+  if (dom.playlistsCount) dom.playlistsCount.textContent = state.playlists.length
+
+  if (!state.playlists.length) {
+    dom.playlistsList.innerHTML = `
+      <div class="playlist-empty-hint">
+        <div class="empty">No saved playlists yet</div>
+        <div class="text-sm text-muted">Add a YouTube playlist above, then activate it to use as your fallback rotation.</div>
+      </div>
+    `
+    return
+  }
+
+  const activeId = state.config?.fallbackPlaylist?.playlistId
+
+  dom.playlistsList.innerHTML = state.playlists
+    .map((playlist) => {
+      const isActive = playlist.id === activeId
+      return `
+        <div class="row-wrapper ${isActive ? 'row-active' : ''}">
+          <div class="row flex-1">
+            <img src="${escapeHtml(playlist.thumbnail)}" class="thumbnail" alt="${escapeHtml(playlist.title)}">
+            <div class="row-info">
+              <div class="row-title text-sm text-primary">${escapeHtml(playlist.title)}</div>
+              <div class="text-xs text-secondary">${playlist.itemCount} tracks${isActive ? ' · active' : ''}</div>
+            </div>
+          </div>
+          <div class="row-tag row">
+            <button class="btn btn-icon ${isActive ? 'active' : ''}" data-action="playlist-activate" data-id="${escapeHtml(playlist.id)}" title="${isActive ? 'Active' : 'Activate'}">
+              ${isActive ? CHECK_ICON : PLAY_ICON}
+            </button>
+            <button class="btn btn-icon btn-danger" data-action="playlist-delete" data-id="${escapeHtml(playlist.id)}" title="Delete">${DELETE_ICON}</button>
+          </div>
+        </div>
+      `
+    })
+    .join('')
+}
+
+async function addPlaylist() {
+  const value = dom.playlistUrlInput.value.trim()
+  dom.playlistError.classList.add('hidden')
+
+  if (!value) return
+
+  await withLoading(dom.playlistAddBtn, async () => {
+    try {
+      const result = await api.addPlaylist(value)
+
+      if (!result.success) {
+        dom.playlistError.textContent = result.error || 'Error adding playlist'
+        dom.playlistError.classList.remove('hidden')
+        return
+      }
+
+      dom.playlistUrlInput.value = ''
+      await loadPlaylists()
+    } catch (error) {
+      dom.playlistError.textContent = error.message || 'Error adding playlist'
+      dom.playlistError.classList.remove('hidden')
+    }
+  })
+}
+
+async function activatePlaylist(id) {
+  try {
+    state.config = await api.activatePlaylist(id)
+    renderPlaylists()
+    await refreshFallbackState()
+  } catch (error) {
+    log('Error activating playlist:', error)
+  }
+}
+
+async function deletePlaylist(id) {
+  if (!confirm('Remove this playlist?')) return
+
+  try {
+    await api.removePlaylist(id)
+    await loadPlaylists()
+  } catch (error) {
+    log('Error deleting playlist:', error)
+  }
+}
+
+dom.playlistsList?.addEventListener('click', (event) => {
+  const activateBtn = event.target.closest('[data-action="playlist-activate"]')
+  const deleteBtn = event.target.closest('[data-action="playlist-delete"]')
+
+  if (activateBtn) return activatePlaylist(activateBtn.dataset.id)
+  if (deleteBtn) return deletePlaylist(deleteBtn.dataset.id)
+})
+
+dom.playlistUrlInput?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') addPlaylist()
+})
+
 document.querySelectorAll('.btn-tab').forEach((el) => {
   el.addEventListener('click', (event) => {
     switchTab(el.dataset.tabTarget)
@@ -887,15 +1062,28 @@ window.onYouTubeIframeAPIReady = () => {
 }
 
 async function init() {
-  await Promise.allSettled([loadSecrets(), loadConfig(), loadPreviewSettings(), loadNetworkInfo(), refreshState(), refreshFallbackState()])
+  await Promise.allSettled([
+    loadSecrets(),
+    loadConfig(),
+    loadPreviewSettings(),
+    loadNetworkInfo(),
+    loadPlaylists(),
+    loadActivity(),
+    refreshState(),
+    refreshFallbackState()
+  ])
 
   setInterval(() => {
-    if (activeTab === 'stream') refreshState()
+    if (activeTab === 'dashboard') refreshState()
   }, 2000)
 
   setInterval(() => {
-    if (activeTab === 'stream') refreshFallbackState()
+    if (activeTab === 'dashboard') refreshFallbackState()
   }, 30000)
+
+  setInterval(() => {
+    if (activeTab === 'dashboard') loadActivity()
+  }, 5000)
 
   log('Control panel initialized')
 }

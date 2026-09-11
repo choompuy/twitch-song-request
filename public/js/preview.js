@@ -6,6 +6,8 @@ let settings = {}
 
 const log = createLogger('PREVIEW')
 
+const isPlaybackSource = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+
 const dom = {
   playerWrapper: $('playerWrapper'),
   badge: $('nowPlaying'),
@@ -63,6 +65,8 @@ function renderState(state) {
   renderCurrent(state)
   updateMediaVisibility(settings)
 
+  if (!isPlaybackSource) return
+
   if (isPlayerReady) {
     if (state.isPaused) {
       player.pauseVideo()
@@ -89,7 +93,7 @@ function renderState(state) {
 }
 
 function updateProgress() {
-  if (!player || !currentState?.current) {
+  if (!isPlaybackSource || !player || !currentState?.current) {
     dom.progressBar.style.width = '0%'
     dom.elapsedTime.textContent = '0:00 / 0:00'
     return
@@ -149,34 +153,39 @@ function onPlayerError(event) {
   }
 }
 
-window.onYouTubeIframeAPIReady = () => {
-  log('YouTube API ready')
-  player = new YT.Player('player', {
-    width: '100%',
-    height: '100%',
-    playerVars: {
-      autoplay: 1,
-      controls: 0,
-      rel: 0,
-      cc_load_policy: 0,
-      iv_load_policy: 3,
-      disablekb: 1,
-      playsinline: 1
-    },
-    events: {
-      onReady: onPlayerReady,
-      onStateChange: onPlayerStateChange,
-      onError: onPlayerError
-    }
-  })
+if (isPlaybackSource) {
+  window.onYouTubeIframeAPIReady = () => {
+    log('YouTube API ready')
+    player = new YT.Player('player', {
+      width: '100%',
+      height: '100%',
+      playerVars: {
+        autoplay: 1,
+        controls: 0,
+        rel: 0,
+        cc_load_policy: 0,
+        iv_load_policy: 3,
+        disablekb: 1,
+        playsinline: 1
+      },
+      events: {
+        onReady: onPlayerReady,
+        onStateChange: onPlayerStateChange,
+        onError: onPlayerError
+      }
+    })
+  }
+
+  const tag = document.createElement('script')
+  tag.src = 'https://www.youtube.com/iframe_api'
+  const firstScriptTag = document.getElementsByTagName('script')[0]
+  firstScriptTag.parentNode.insertBefore(tag, firstScriptTag)
+} else {
+  log('Non-localhost origin: read-only widget, no embedded player')
+  dom.playerWrapper.classList.add('hidden')
 }
 
 setInterval(() => {
   fetchPreviewState()
   updateProgress()
 }, 1000)
-
-const tag = document.createElement('script')
-tag.src = 'https://www.youtube.com/iframe_api'
-const firstScriptTag = document.getElementsByTagName('script')[0]
-firstScriptTag.parentNode.insertBefore(tag, firstScriptTag)

@@ -5,7 +5,7 @@ import { getConfig, updateConfig } from './config.js'
 import { getSettings, setSettings } from './settings.js'
 import { fetchPlaylistSongs } from './youtube/index.js'
 import { createFileStore } from './persist.js'
-import { Settings, QueueItem, Song, PlayerState, FallbackStateResponse, FallbackTrackView, AppError } from './types.js'
+import { Settings, QueueItem, Song, PlayerState, FallbackStateResponse, FallbackTrackView, AppError, ActivityEntry, ActivityStatus } from './types.js'
 
 type StateFile = {
   current: QueueItem | null
@@ -30,6 +30,20 @@ const queueVideoIds = new Set<string>()
 const userQueueCounts = new Map<string, number>()
 
 let isPaused = false
+
+const ACTIVITY_LIMIT = 30
+const activityLog: ActivityEntry[] = []
+
+export function logActivity(entry: Omit<ActivityEntry, 'at'>): void {
+  activityLog.unshift({ ...entry, at: Date.now() })
+  if (activityLog.length > ACTIVITY_LIMIT) {
+    activityLog.length = ACTIVITY_LIMIT
+  }
+}
+
+export function getActivity(): ActivityEntry[] {
+  return [...activityLog]
+}
 
 let fallbackSourceTracks: Song[] = []
 let fallbackOrder: string[] = []

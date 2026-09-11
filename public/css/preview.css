@@ -4,7 +4,7 @@
 html {
   width: 100dvw;
   height: 100dvh;
-  padding: 1rem;
+  padding: 0.25rem;
   overflow: hidden;
 }
 
@@ -28,7 +28,7 @@ body {
 
 .badge {
   position: absolute;
-  inset: 0.5rem;
+  inset: 0.25rem;
 }
 
 .now-playing-badge {
@@ -84,10 +84,6 @@ body {
   height: 4rem;
   border-radius: var(--radius-sm);
   object-fit: cover;
-}
-
-.now-playing .thumbnail.hidden {
-  display: none;
 }
 
 .now-playing .title {

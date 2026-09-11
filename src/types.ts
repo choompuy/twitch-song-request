@@ -1,3 +1,13 @@
+export type ActivityStatus = 'accepted' | 'rejected'
+export type ActivityEntry = {
+  requestedBy: string
+  query: string
+  title: string | null
+  status: ActivityStatus
+  reason: string | null
+  at: number
+}
+
 export type Config = {
   minViews: number
   minDurationSeconds: number
@@ -98,3 +108,4 @@ export type FallbackStateResponse = FallbackPlaylist & {
 }
 export type QueueRemoveResponse = { removed: QueueItem; state: PlayerState }
 export type SecretsResponse = { youtubeApiKey: string; hasYoutubeApiKey: boolean }
+export type ActivityResponse = { entries: ActivityEntry[] }

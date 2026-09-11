@@ -13,9 +13,11 @@ import {
   QueueRequestResponse,
   FallbackStateResponse,
   QueueRemoveResponse,
-  SecretsResponse
+  SecretsResponse,
+  ActivityResponse
 } from './types.js'
 import { ok, fail, failFromError } from './http.js'
+import { AppError } from './types.js'
 import { getPublicSecretsView, updateSecrets } from './secrets.js'
 import { getConfig, updateConfig } from './config.js'
 import { getSettings, updateSettings } from './settings.js'
@@ -36,7 +38,9 @@ import {
   toggleFallbackRepeat,
   toggleFallbackEnabled,
   playFallbackTrackNow,
-  queueFallbackTrack
+  queueFallbackTrack,
+  logActivity,
+  getActivity
 } from './queue.js'
 
 const app = express()
@@ -270,6 +274,10 @@ app.get('/api/search', async (req, res) => {
   }
 })
 
+app.get('/api/activity', (_req, res) => {
+  ok<ActivityResponse>(res, { entries: getActivity() })
+})
+
 app.post('/api/queue/request', async (req, res) => {
   const { query, requestedBy, admin } = req.body ?? {}
   const bypassFilters = admin === true
@@ -291,6 +299,7 @@ app.post('/api/queue/request', async (req, res) => {
 
     if (isYouTube && !videoId) {
       log(`[REJECT] ${trimmedRequestedBy} → INVALID_YOUTUBE_URL`)
+      logActivity({ requestedBy: trimmedRequestedBy, query: trimmedQuery, title: null, status: 'rejected', reason: 'некорректная ссылка' })
       return fail(res, 'некорректная ссылка на YouTube', 'INVALID_YOUTUBE_URL', 400)
     }
 
@@ -305,6 +314,13 @@ app.post('/api/queue/request', async (req, res) => {
 
     if (!song) {
       log(`[REJECT] ${trimmedRequestedBy} → SONG_NOT_FOUND`)
+      logActivity({
+        requestedBy: trimmedRequestedBy,
+        query: trimmedQuery,
+        title: null,
+        status: 'rejected',
+        reason: 'не найдено или не прошло фильтры'
+      })
       return fail(res, 'не удалось найти подходящий трек', 'SONG_NOT_FOUND', 404)
     }
 
@@ -318,6 +334,8 @@ app.post('/api/queue/request', async (req, res) => {
     } else {
       log(`[ACCEPT] ${trimmedRequestedBy} → "${song.title}" - queued`)
     }
+
+    logActivity({ requestedBy: trimmedRequestedBy, query: trimmedQuery, title: song.title, status: 'accepted', reason: null })
 
     const state = getState()
     const position = wasEmpty ? 0 : state.queue.length
@@ -335,6 +353,8 @@ app.post('/api/queue/request', async (req, res) => {
     )
   } catch (error) {
     log(`[REJECT] ${trimmedRequestedBy} → error while adding song`)
+    const reason = error instanceof AppError ? error.message : 'ошибка сервера'
+    logActivity({ requestedBy: trimmedRequestedBy, query: trimmedQuery, title: null, status: 'rejected', reason })
     failFromError(res, error)
   }
 })
