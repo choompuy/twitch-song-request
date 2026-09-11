@@ -351,7 +351,28 @@ export function getIsPaused(): boolean {
   return isPaused
 }
 
-function assertCanAddSong(song: Song, requestedBy: string, addToQueue: boolean): void {
+export function playFallbackTrackNow(videoId: string): QueueItem | null {
+  const index = fallbackOrder.indexOf(videoId)
+  if (index === -1) return null
+
+  const song = findTrack(videoId)
+  if (!song) return null
+
+  fallbackCursor = index
+  const item = toFallbackQueueItem(song)
+  setCurrent(item)
+  log(`[FALLBACK] Play now: "${song.title}"`)
+  return item
+}
+
+export function queueFallbackTrack(videoId: string): QueueItem | null {
+  const song = findTrack(videoId)
+  if (!song) return null
+
+  return addSong(song, 'Jam', true)
+}
+
+export function assertCanAddSong(song: Song, requestedBy: string, addToQueue: boolean): void {
   const config = getConfig()
   const normalized = requestedBy.toLowerCase()
 

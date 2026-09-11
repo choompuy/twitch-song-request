@@ -10,14 +10,22 @@ const state = {
   isPaused: false,
   nextTrack: null,
   settings: {
-    showVideo: true
+    showVideo: true,
+    position: 'bottom-right'
   },
   config: null,
-  fallback: null
+  fallback: null,
+  playlists: [],
+  network: null,
+  selectedIp: null
 }
 
 const dom = {
   showVideo: $('showVideo'),
+  badgePosition: $('badgePosition'),
+  previewUrl: $('previewUrl'),
+  selectIp: $('selectIp'),
+  controlPanelQr: $('controlPanelQr'),
 
   cfgMinViews: $('cfgMinViews'),
   cfgMinDuration: $('cfgMinDuration'),
@@ -61,7 +69,12 @@ const dom = {
   fallbackRefreshBtn: $('fallbackRefreshBtn'),
   fallbackRepeatBtn: $('fallbackRepeatBtn'),
   fallbackShuffleBtn: $('fallbackShuffleBtn'),
-  fallbackEnabledToggle: $('fallbackEnabledToggle')
+  fallbackEnabledToggle: $('fallbackEnabledToggle'),
+
+  playlistUrlInput: $('playlistUrlInput'),
+  playlistNameInput: $('playlistNameInput'),
+  playlistAddBtn: $('playlistAddBtn'),
+  playlistsList: $('playlistsList')
 }
 
 const CONFIG_FIELDS = [
@@ -161,14 +174,15 @@ const api = {
 
   getState: () => request('/api/state'),
 
-  search: (query) => request(`/api/search?q=${encodeURIComponent(query)}`),
+  search: (query) => request(`/api/search?q=${encodeURIComponent(query)}&admin=1`),
 
   requestSong: (query) =>
     request('/api/queue/request', {
       method: 'POST',
       body: JSON.stringify({
         query,
-        requestedBy: 'ControlPanel'
+        requestedBy: 'ControlPanel',
+        admin: true
       })
     }),
 
@@ -217,6 +231,36 @@ const api = {
   enabledFallback: () =>
     request('/api/fallback/enabled', {
       method: 'POST'
+    }),
+
+  playFallback: (videoId) =>
+    request(`/api/fallback/play/${encodeURIComponent(videoId)}`, {
+      method: 'POST'
+    }),
+
+  enqueueFallback: (videoId) =>
+    request(`/api/fallback/enqueue/${encodeURIComponent(videoId)}`, {
+      method: 'POST'
+    }),
+
+  getNetworkInfo: () => request('/api/network-info'),
+
+  getPlaylists: () => request('/api/playlists'),
+
+  addPlaylist: (playlistId) =>
+    request('/api/playlists', {
+      method: 'POST',
+      body: JSON.stringify({ playlistId })
+    }),
+
+  removePlaylist: (id) =>
+    request(`/api/playlists/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }),
+
+  activatePlaylist: (id) =>
+    request(`/api/playlists/${encodeURIComponent(id)}/activate`, {
+      method: 'POST'
     })
 }
 
@@ -227,6 +271,9 @@ async function loadPreviewSettings() {
     if (dom.showVideo) {
       dom.showVideo.checked = Boolean(state.settings.showVideo)
     }
+    if (dom.badgePosition) {
+      dom.badgePosition.value = state.settings.position || 'bottom-right'
+    }
   } catch (error) {
     log('Error loading settings:', error)
   }
@@ -235,12 +282,72 @@ async function loadPreviewSettings() {
 async function savePreviewSettings() {
   try {
     state.settings.showVideo = dom.showVideo.checked
+    state.settings.position = dom.badgePosition ? dom.badgePosition.value : state.settings.position
 
     await api.updateSettings(state.settings)
 
     syncPlayer()
   } catch (error) {
     log('Error saving settings:', error)
+  }
+}
+
+function copyPreviewUrl() {
+  if (!dom.previewUrl) return
+  navigator.clipboard?.writeText(dom.previewUrl.href).catch((error) => log('Copy failed:', error))
+}
+
+async function loadNetworkInfo() {
+  try {
+    state.network = await api.getNetworkInfo()
+
+    if (!state.network.ips.length) {
+      state.selectedIp = 'localhost'
+    } else if (!state.selectedIp) {
+      state.selectedIp = state.network.ips[0]
+    }
+
+    renderQrUrl()
+  } catch (error) {
+    log('Error loading network info:', error)
+  }
+}
+
+function renderQrUrl() {
+  const host = state.selectedIp === 'localhost' ? 'localhost' : state.selectedIp
+  const port = state.network?.port ?? location.port
+  const url = `http://${host}${port ? `:${port}` : ''}`
+
+  if (dom.selectIp) {
+    const ips = state.network?.ips ?? []
+
+    if (ips.length > 1) {
+      dom.selectIp.classList.remove('hidden')
+      dom.selectIp.innerHTML = ips
+        .map((ip) => `<option value="${escapeHtml(ip)}" ${ip === state.selectedIp ? 'selected' : ''}>${escapeHtml(ip)}</option>`)
+        .join('')
+    } else {
+      dom.selectIp.classList.add('hidden')
+    }
+  }
+
+  if (dom.controlPanelQr && !dom.controlPanelQr.classList.contains('hidden')) {
+    if (!dom.controlPanelQr || typeof QRCode === 'undefined') return
+    dom.controlPanelQr.innerHTML = ''
+    new QRCode(dom.controlPanelQr, { text: url, width: 128, height: 128 })
+  }
+}
+
+function onIpChange() {
+  state.selectedIp = dom.selectIp.value
+  renderQrUrl()
+}
+
+function toggleQr() {
+  if (!dom.controlPanelQr) return
+  dom.controlPanelQr.classList.toggle('hidden')
+  if (!dom.controlPanelQr.classList.contains('hidden')) {
+    renderQrUrl(state.selectedIp)
   }
 }
 
@@ -628,6 +735,10 @@ function renderFallback() {
             </div>
             <span class="text-sm text-secondary">${formatDuration(track.duration)}</span>
           </div>
+          <div class="row-tag row">
+            <button class="btn btn-icon" data-action="fallback-enqueue" data-video-id="${escapeHtml(track.videoId)}" title="Add to queue">${PLUS_ICON}</button>
+            <button class="btn btn-icon" data-action="fallback-play" data-video-id="${escapeHtml(track.videoId)}" title="Play now">${PLAY_ICON}</button>
+          </div>
         </div>
       `
     })
@@ -684,6 +795,32 @@ async function toggleFallbackEnabled() {
     log('Failed to toggle enabled:', error)
   }
 }
+
+async function playFallbackNow(videoId) {
+  try {
+    await api.playFallback(videoId)
+    await refreshState()
+  } catch (error) {
+    log('Error playing fallback track:', error)
+  }
+}
+
+async function enqueueFallbackTrack(videoId) {
+  try {
+    await api.enqueueFallback(videoId)
+    await refreshState()
+  } catch (error) {
+    log('Error queueing fallback track:', error)
+  }
+}
+
+dom.fallbackList?.addEventListener('click', (event) => {
+  const playBtn = event.target.closest('[data-action="fallback-play"]')
+  const enqueueBtn = event.target.closest('[data-action="fallback-enqueue"]')
+
+  if (playBtn) return playFallbackNow(playBtn.dataset.videoId)
+  if (enqueueBtn) return enqueueFallbackTrack(enqueueBtn.dataset.videoId)
+})
 
 document.querySelectorAll('.btn-tab').forEach((el) => {
   el.addEventListener('click', (event) => {
@@ -750,7 +887,7 @@ window.onYouTubeIframeAPIReady = () => {
 }
 
 async function init() {
-  await Promise.allSettled([loadSecrets(), loadConfig(), loadPreviewSettings(), refreshState(), refreshFallbackState()])
+  await Promise.allSettled([loadSecrets(), loadConfig(), loadPreviewSettings(), loadNetworkInfo(), refreshState(), refreshFallbackState()])
 
   setInterval(() => {
     if (activeTab === 'stream') refreshState()

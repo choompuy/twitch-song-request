@@ -104,39 +104,41 @@ function resetQuotaIfNeeded(): void {
   saveCache()
 }
 
-export function getSearchCache(query: string): Song[] | null {
+export function getSearchCache(query: string, filtersVersion: string): Song[] | null {
   const entry = cache.searches[query]
 
-  if (!entry || entry.expiresAt <= Date.now()) {
+  if (!entry || entry.expiresAt <= Date.now() || entry.filtersVersion !== filtersVersion) {
     return null
   }
 
   return entry.results
 }
 
-export function setSearchCache(query: string, results: Song[]): void {
+export function setSearchCache(query: string, results: Song[], filtersVersion: string): void {
   cache.searches[query] = {
     results,
-    expiresAt: Date.now() + CACHE_LIMITS.SEARCH_CACHE_TTL
+    expiresAt: Date.now() + CACHE_LIMITS.SEARCH_CACHE_TTL,
+    filtersVersion
   }
 
   saveCache()
 }
 
-export function getVideoCache(videoId: string): Song | null | undefined {
+export function getVideoCache(videoId: string, filtersVersion: string): Song | null | undefined {
   const entry = cache.videos[videoId]
 
-  if (!entry || entry.expiresAt <= Date.now()) {
+  if (!entry || entry.expiresAt <= Date.now() || entry.filtersVersion !== filtersVersion) {
     return undefined
   }
 
   return entry.song
 }
 
-export function setVideoCache(videoId: string, song: Song | null): void {
+export function setVideoCache(videoId: string, song: Song | null, filtersVersion: string): void {
   cache.videos[videoId] = {
     song,
-    expiresAt: Date.now() + CACHE_LIMITS.VIDEO_CACHE_TTL
+    expiresAt: Date.now() + CACHE_LIMITS.VIDEO_CACHE_TTL,
+    filtersVersion
   }
 
   saveCache()

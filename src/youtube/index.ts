@@ -1,8 +1,9 @@
 import { Song, AppError } from '../types.js'
-import { youtube, videoToSong, isValidSong } from './client.js'
+import { youtube, videoToSong, isValidSong, fetchPlaylistMeta, PlaylistMeta } from './client.js'
 import { normalize, combinedScore, formatViews } from './scoring.js'
 import { getSearchCache, setSearchCache, getVideoCache, setVideoCache, canSearch, consumeSearchQuota, CACHE_LIMITS } from './cache.js'
 import { VideoItem, SearchItem, PlaylistItem } from './types.js'
+import { getConfig } from '../config.js'
 
 const pendingSearches = new Map<string, Promise<Song[]>>()
 const pendingVideos = new Map<string, Promise<Song | null>>()
@@ -20,19 +21,25 @@ function dedupInFlight<T>(pending: Map<string, Promise<T>>, key: string, run: ()
   return request.finally(() => pending.delete(key))
 }
 
-export async function getVideoById(videoId: string): Promise<Song | null> {
+/** Ключ версии фильтров - меняется при правке любого из полей, влияющих на isValidSong. Инвалидирует кэш при смене настроек. */
+function filtersVersion(): string {
+  const c = getConfig()
+  return `${c.minViews}:${c.minDurationSeconds}:${c.maxDurationSeconds}`
+}
+
+export async function getVideoById(videoId: string, bypassFilters = false): Promise<Song | null> {
   console.log(`[VIDEO] Fetching video by ID: ${videoId}`)
-  const cached = getVideoCache(videoId)
+  const cached = bypassFilters ? undefined : getVideoCache(videoId, filtersVersion())
 
   if (cached !== undefined) {
     console.log(`[CACHE] Video ${videoId}`)
     return cached
   }
 
-  return dedupInFlight(pendingVideos, videoId, () => fetchVideoById(videoId))
+  return dedupInFlight(pendingVideos, `${bypassFilters ? 'raw:' : ''}${videoId}`, () => fetchVideoById(videoId, bypassFilters))
 }
 
-async function fetchVideoById(videoId: string): Promise<Song | null> {
+async function fetchVideoById(videoId: string, bypassFilters: boolean): Promise<Song | null> {
   try {
     const details = await youtube<{ items: VideoItem[] }>('videos', {
       part: 'snippet,contentDetails,statistics,status',
@@ -43,20 +50,20 @@ async function fetchVideoById(videoId: string): Promise<Song | null> {
 
     if (!video) {
       console.log(`[VIDEO] Video not found: ${videoId}`)
-      setVideoCache(videoId, null)
+      if (!bypassFilters) setVideoCache(videoId, null, filtersVersion())
       return null
     }
 
     const song = videoToSong(video)
 
-    if (!isValidSong(song, video)) {
+    if (!bypassFilters && !isValidSong(song, video)) {
       console.log(`[VIDEO] Video rejected: "${song.title}"`)
-      setVideoCache(videoId, null)
+      setVideoCache(videoId, null, filtersVersion())
       return null
     }
 
     console.log(`[VIDEO] Valid: "${song.title}" - ${formatViews(song.views)} views`)
-    setVideoCache(videoId, song)
+    if (!bypassFilters) setVideoCache(videoId, song, filtersVersion())
 
     return song
   } catch (error) {
@@ -70,7 +77,7 @@ async function fetchVideoById(videoId: string): Promise<Song | null> {
   }
 }
 
-export async function searchSongs(query: string): Promise<Song[]> {
+export async function searchSongs(query: string, bypassFilters = false): Promise<Song[]> {
   const normalizedQuery = normalize(query)
 
   console.log(`[SEARCH] Query: "${normalizedQuery}"`)
@@ -79,7 +86,8 @@ export async function searchSongs(query: string): Promise<Song[]> {
     return []
   }
 
-  const cached = getSearchCache(normalizedQuery)
+  const cacheKey = bypassFilters ? `raw:${normalizedQuery}` : normalizedQuery
+  const cached = bypassFilters ? null : getSearchCache(normalizedQuery, filtersVersion())
 
   if (cached !== null) {
     console.log(`[CACHE] Search: "${normalizedQuery}" - ${cached.length} results`)
@@ -91,17 +99,17 @@ export async function searchSongs(query: string): Promise<Song[]> {
     throw new AppError('YOUTUBE_QUOTA', 'дневной лимит поиска YouTube исчерпан, используйте ссылку.')
   }
 
-  return dedupInFlight(pendingSearches, normalizedQuery, () => performSearch(normalizedQuery))
+  return dedupInFlight(pendingSearches, cacheKey, () => performSearch(normalizedQuery, bypassFilters))
 }
 
-function mapValidSongs(videos: VideoItem[]): Song[] {
+function mapValidSongs(videos: VideoItem[], bypassFilters = false): Song[] {
   return videos
     .map((video) => ({ video, song: videoToSong(video) }))
-    .filter(({ video, song }) => isValidSong(song, video))
+    .filter(({ video, song }) => bypassFilters || isValidSong(song, video))
     .map(({ song }) => song)
 }
 
-async function performSearch(query: string): Promise<Song[]> {
+async function performSearch(query: string, bypassFilters: boolean): Promise<Song[]> {
   try {
     consumeSearchQuota()
     const search = await youtube<{ items: SearchItem[] }>('search', {
@@ -120,7 +128,7 @@ async function performSearch(query: string): Promise<Song[]> {
     console.log(`[SEARCH] Found ${ids.length} candidates`)
 
     if (!ids.length) {
-      setSearchCache(query, [])
+      if (!bypassFilters) setSearchCache(query, [], filtersVersion())
       return []
     }
 
@@ -129,12 +137,14 @@ async function performSearch(query: string): Promise<Song[]> {
       id: ids.join(',')
     })
 
-    const songs = mapValidSongs(details.items ?? [])
+    const songs = mapValidSongs(details.items ?? [], bypassFilters)
 
     console.log(`[FILTER] ${songs.length} suitable results`)
     songs.sort((a, b) => combinedScore(b, query) - combinedScore(a, query))
-    setSearchCache(query, songs)
-    console.log(`[CACHE] Saved "${query}" - ${songs.length} results`)
+    if (!bypassFilters) {
+      setSearchCache(query, songs, filtersVersion())
+      console.log(`[CACHE] Saved "${query}" - ${songs.length} results`)
+    }
     return songs
   } catch (error) {
     console.error('[ERROR] YouTube search:', error instanceof Error ? error.message : error)
@@ -157,6 +167,9 @@ export function selectBestSong(songs: Song[], query: string): Song | null {
   console.log(`[SELECT] "${selected.title}" - ${formatViews(selected.views)} views`)
   return selected
 }
+
+export { fetchPlaylistMeta }
+export type { PlaylistMeta }
 
 export async function fetchPlaylistSongs(playlistId: string): Promise<Song[]> {
   if (!playlistId) {

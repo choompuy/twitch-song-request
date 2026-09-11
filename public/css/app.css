@@ -18,6 +18,7 @@ header {
 
 main {
   padding-top: 1rem;
+  padding-bottom: 5rem;
   overflow: auto;
   z-index: 5;
 }
@@ -32,6 +33,7 @@ main {
 .tab {
   display: none;
 }
+
 .tab.active {
   display: block;
 }
@@ -39,7 +41,7 @@ main {
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1rem;
+  gap: 0.5rem;
 }
 
 @media (max-width: 900px) {
@@ -109,6 +111,7 @@ a {
 }
 
 .input {
+  align-content: center;
   width: 100%;
   height: 2.5rem;
   padding-inline: 0.75rem;
@@ -118,19 +121,10 @@ a {
   color: var(--text-primary);
 }
 
+
 .input:focus {
   outline: none;
   border-color: var(--accent-blue);
-}
-
-.thumbnail {
-  flex-shrink: 0;
-  width: auto;
-  height: 3rem;
-  background: var(--bg-elevated);
-  border-radius: var(--radius-sm);
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
 }
 
 .checkbox-wrapper {
@@ -188,10 +182,30 @@ a {
   background-color: var(--accent-blue-hover);
 }
 
+.thumbnail {
+  flex-shrink: 0;
+  width: auto;
+  height: 3rem;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.contol-panel-qr {
+  width: 100%;
+  height: 8rem;
+}
+
+.contol-panel-qr canvas,
+.contol-panel-qr img {
+  width: auto !important;
+  height: 100% !important;
+}
+
 .panel {
   display: flex;
   flex-direction: column;
-  margin-bottom: 1rem;
   padding-block: 1rem;
   gap: 1rem;
   background: var(--bg-panel);
@@ -308,6 +322,7 @@ a {
   opacity: 0.6;
   transition: opacity 0.2s ease;
 }
+
 .next-song:hover {
   opacity: 1;
 }

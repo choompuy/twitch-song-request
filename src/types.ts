@@ -43,11 +43,13 @@ export type PlayerState = {
 type SearchCacheEntry = {
   results: Song[]
   expiresAt: number
+  filtersVersion: string
 }
 
 type VideoCacheEntry = {
   song: Song | null
   expiresAt: number
+  filtersVersion: string
 }
 
 export type CacheFile = {

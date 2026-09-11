@@ -2,6 +2,7 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import open from 'open'
+import os from 'node:os'
 
 import {
   StateResponse,
@@ -18,7 +19,8 @@ import { ok, fail, failFromError } from './http.js'
 import { getPublicSecretsView, updateSecrets } from './secrets.js'
 import { getConfig, updateConfig } from './config.js'
 import { getSettings, updateSettings } from './settings.js'
-import { searchSongs, getVideoById, selectBestSong } from './youtube/index.js'
+import { searchSongs, getVideoById, selectBestSong, fetchPlaylistMeta } from './youtube/index.js'
+import { getPlaylists, upsertPlaylist, removePlaylist } from './playlists.js'
 import {
   getState,
   addSong,
@@ -32,7 +34,9 @@ import {
   getFallbackState,
   toggleFallbackShuffle,
   toggleFallbackRepeat,
-  toggleFallbackEnabled
+  toggleFallbackEnabled,
+  playFallbackTrackNow,
+  queueFallbackTrack
 } from './queue.js'
 
 const app = express()
@@ -100,7 +104,8 @@ function isValidVideoId(value: string | null | undefined): value is string {
   return Boolean(value && /^[a-zA-Z0-9_-]{11}$/.test(value))
 }
 
-const PLAYLIST_ID_PATTERN = /^(PL|UU|LL|FL|OL|RD)[A-Za-z0-9_-]+$/
+const PLAYLIST_ID_PATTERN =
+  /^(PL[A-Za-z0-9_-]{16,}|RD[A-Za-z0-9_-]{11}|UU[A-Za-z0-9_-]{16,}|LL[A-Za-z0-9_-]{16,}|FL[A-Za-z0-9_-]{16,}|OL[A-Za-z0-9_-]{16,})$/
 
 function parsePlaylistId(input: string): string | null {
   const trimmed = input.trim()
@@ -112,7 +117,6 @@ function parsePlaylistId(input: string): string | null {
   try {
     const url = new URL(trimmed)
     const listParam = url.searchParams.get('list')
-    console.log(listParam)
     if (listParam) {
       return PLAYLIST_ID_PATTERN.test(listParam) ? listParam : null
     }
@@ -123,6 +127,21 @@ function parsePlaylistId(input: string): string | null {
 
   return PLAYLIST_ID_PATTERN.test(trimmed) ? trimmed : null
 }
+
+app.get('/api/network-info', (_req, res) => {
+  const ips: string[] = []
+  const interfaces = os.networkInterfaces()
+
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] ?? []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        ips.push(iface.address)
+      }
+    }
+  }
+
+  ok(res, { port: PORT, ips })
+})
 
 app.get('/preview', (_req, res) => {
   res.sendFile('preview.html', {
@@ -189,15 +208,61 @@ app.put('/api/config', async (req, res) => {
   ok<ConfigResponse>(res, updated)
 })
 
+app.get('/api/playlists', (_req, res) => {
+  ok(res, { playlists: getPlaylists() })
+})
+
+app.post('/api/playlists', async (req, res) => {
+  const raw = typeof req.body?.playlistId === 'string' ? req.body.playlistId : ''
+  const parsedId = parsePlaylistId(raw)
+
+  if (!parsedId) {
+    return fail(res, 'некорректный ID или ссылка на плейлист', 'INVALID_PLAYLIST_ID', 400)
+  }
+
+  try {
+    const meta = await fetchPlaylistMeta(parsedId)
+    if (!meta) {
+      return fail(res, 'плейлист не найден', 'PLAYLIST_NOT_FOUND', 404)
+    }
+    const saved = upsertPlaylist(meta)
+    ok(res, { playlist: saved }, 201)
+  } catch (error) {
+    failFromError(res, error)
+  }
+})
+
+app.delete('/api/playlists/:id', (req, res) => {
+  const removed = removePlaylist(req.params.id)
+  if (!removed) {
+    return fail(res, 'плейлист не найден', 'PLAYLIST_NOT_FOUND', 404)
+  }
+  ok(res, { playlists: getPlaylists() })
+})
+
+app.post('/api/playlists/:id/activate', async (req, res) => {
+  const updated = updateConfig({ fallbackPlaylist: { ...getConfig().fallbackPlaylist, playlistId: req.params.id } })
+
+  try {
+    await refreshFallback()
+  } catch (error) {
+    log(`[ERROR] Failed to activate playlist: ${error instanceof Error ? error.message : error}`)
+    return ok<ConfigResponse>(res, { ...updated, fallbackPlaylistWarning: 'не удалось загрузить плейлист' })
+  }
+
+  ok<ConfigResponse>(res, updated)
+})
+
 app.get('/api/search', async (req, res) => {
   const query = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+  const bypassFilters = req.query.admin === '1'
 
   if (query.length < 2) {
     return fail(res, 'запрос должен содержать минимум 2 символа', 'INVALID_QUERY', 400)
   }
 
   try {
-    const songs = await searchSongs(query)
+    const songs = await searchSongs(query, bypassFilters)
     ok<SearchResponse>(res, { results: songs })
   } catch (error) {
     log(`[ERROR] Search: ${error instanceof Error ? error.message : error}`)
@@ -206,7 +271,8 @@ app.get('/api/search', async (req, res) => {
 })
 
 app.post('/api/queue/request', async (req, res) => {
-  const { query, requestedBy } = req.body ?? {}
+  const { query, requestedBy, admin } = req.body ?? {}
+  const bypassFilters = admin === true
 
   if (typeof query !== 'string' || query.trim().length < 2 || query.trim().length > 200) {
     return fail(res, 'запрос должен быть от 2 до 200 символов', 'INVALID_QUERY', 400)
@@ -230,10 +296,10 @@ app.post('/api/queue/request', async (req, res) => {
 
     if (videoId) {
       log(`[REQUEST] ${trimmedRequestedBy} → YouTube URL: ${videoId}`)
-      song = await getVideoById(videoId)
+      song = await getVideoById(videoId, bypassFilters)
     } else {
       log(`[REQUEST] ${trimmedRequestedBy} → Search: "${trimmedQuery}"`)
-      const songs = await searchSongs(trimmedQuery)
+      const songs = await searchSongs(trimmedQuery, bypassFilters)
       song = selectBestSong(songs, trimmedQuery)
     }
 
@@ -311,6 +377,22 @@ app.post('/api/fallback/repeat', (_req, res) => {
 
 app.post('/api/fallback/enabled', (_req, res) => {
   ok<FallbackStateResponse>(res, toggleFallbackEnabled())
+})
+
+app.post('/api/fallback/play/:videoId', (req, res) => {
+  const item = playFallbackTrackNow(req.params.videoId)
+  if (!item) return fail(res, 'трек не найден в fallback', 'NOT_FOUND', 404)
+  ok<StateResponse>(res, getState())
+})
+
+app.post('/api/fallback/enqueue/:videoId', (req, res) => {
+  try {
+    const item = queueFallbackTrack(req.params.videoId)
+    if (!item) return fail(res, 'трек не найден в fallback', 'NOT_FOUND', 404)
+    ok(res, { song: item, state: getState() }, 201)
+  } catch (error) {
+    failFromError(res, error)
+  }
 })
 
 app.delete('/api/queue/:index', (req, res) => {

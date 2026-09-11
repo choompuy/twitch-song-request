@@ -53,6 +53,29 @@ export function videoToSong(video: VideoItem): Song {
   }
 }
 
+export type PlaylistMeta = {
+  id: string
+  title: string
+  thumbnail: string
+  itemCount: number
+}
+
+export async function fetchPlaylistMeta(playlistId: string): Promise<PlaylistMeta | null> {
+  const data = await youtube<{
+    items: Array<{ id: string; snippet?: { title?: string; thumbnails?: { medium?: { url?: string } } }; contentDetails?: { itemCount?: number } }>
+  }>('playlists', { part: 'snippet,contentDetails', id: playlistId })
+
+  const item = data.items?.[0]
+  if (!item) return null
+
+  return {
+    id: item.id,
+    title: item.snippet?.title ?? 'Untitled playlist',
+    thumbnail: item.snippet?.thumbnails?.medium?.url ?? '',
+    itemCount: item.contentDetails?.itemCount ?? 0
+  }
+}
+
 export function isValidSong(song: Song, video: VideoItem): boolean {
   const config = getConfig()
 

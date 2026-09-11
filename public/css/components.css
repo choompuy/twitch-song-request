@@ -30,6 +30,10 @@ body {
   color: var(--accent-green);
 }
 
+.text-blue {
+  color: var(--accent-blue);
+}
+
 .text-lg {
   font-size: 1.25rem;
 }
