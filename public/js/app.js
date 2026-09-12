@@ -1,6 +1,7 @@
 const log = createLogger('CONTROL')
 
 let activeTab = 'dashboard'
+let activeSection = 'queue'
 let player = null
 let playerReady = false
 
@@ -39,24 +40,26 @@ const dom = {
 
   nowPlaying: $('nowPlaying'),
   noPlaying: $('noPlaying'),
-  currentThumbnail: $('currentThumbnail'),
   currentTitle: $('currentTitle'),
   currentChannel: $('currentChannel'),
-  currentViews: $('currentViews'),
   currentDuration: $('currentDuration'),
+  currentViews: $('currentViews'),
   currentRequester: $('currentRequester'),
 
   nextPlaying: $('nextPlaying'),
-  nextThumbnail: $('nextThumbnail'),
   nextTitle: $('nextTitle'),
-  nextChannel: $('nextChannel'),
   nextDuration: $('nextDuration'),
-  nextRequester: $('nextRequester'),
+
+  sectionTabs: $('sectionTabs'),
+  tabQueueCount: $('tabQueueCount'),
+  tabJamCount: $('tabJamCount'),
+  tabRecentCount: $('tabRecentCount'),
 
   queueList: $('queueList'),
   queueCount: $('queueCount'),
 
   searchInput: $('searchInput'),
+  searchResultsWrapper: $('searchResultsWrapper'),
   searchResults: $('searchResults'),
   searchError: $('searchError'),
   searchBtn: $('searchBtn'),
@@ -69,7 +72,8 @@ const dom = {
   fallbackRefreshBtn: $('fallbackRefreshBtn'),
   fallbackRepeatBtn: $('fallbackRepeatBtn'),
   fallbackShuffleBtn: $('fallbackShuffleBtn'),
-  fallbackEnabledToggle: $('fallbackEnabledToggle'),
+  fallbackEnabledBtn: $('fallbackEnabledBtn'),
+  fallbackEnabledText: $('fallbackEnabledText'),
 
   playlistUrlInput: $('playlistUrlInput'),
   playlistAddBtn: $('playlistAddBtn'),
@@ -95,15 +99,15 @@ const CONFIG_FIELDS = [
 const YOUTUBE_URL_PATTERN =
   /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/
 
-function switchTab(tabName) {
+function switchPageTab(tabName) {
   const wasStream = activeTab === 'dashboard'
   activeTab = tabName
 
-  document.querySelectorAll('.tab').forEach((el) => {
-    el.classList.toggle('active', el.dataset.tab === tabName)
+  document.querySelectorAll('.page-tab').forEach((el) => {
+    el.classList.toggle('active', el.dataset.pageTab === tabName)
   })
   document.querySelectorAll('.btn-tab').forEach((el) => {
-    el.classList.toggle('active', el.dataset.tabTarget === tabName)
+    el.classList.toggle('active', el.dataset.pageTabTarget === tabName)
   })
 
   if (!wasStream && tabName === 'dashboard') {
@@ -111,6 +115,23 @@ function switchTab(tabName) {
     refreshFallbackState()
   }
 }
+
+function switchSection(sectionName) {
+  activeSection = sectionName
+
+  document.querySelectorAll('.section-panel').forEach((el) => {
+    el.classList.toggle('active', el.dataset.section === sectionName)
+  })
+  document.querySelectorAll('.section-tab').forEach((el) => {
+    el.classList.toggle('active', el.dataset.sectionTarget === sectionName)
+  })
+}
+
+dom.sectionTabs?.addEventListener('click', (event) => {
+  const button = event.target.closest('.section-tab')
+  if (!button) return
+  switchSection(button.dataset.sectionTarget)
+})
 
 async function request(url, options = {}) {
   const response = await fetch(url, {
@@ -277,7 +298,7 @@ async function loadActivity() {
   }
 }
 
-function timeAgo(timestamp) {
+function formatTime(timestamp) {
   const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
   if (seconds < 60) return `${seconds}s ago`
   const minutes = Math.floor(seconds / 60)
@@ -298,15 +319,15 @@ function renderActivity() {
     .map((entry) => {
       const title = entry.title || entry.query
       return `
-        <div class="row-wrapper">
-          <div class="row flex-1">
-            <div class="row-info">
-              <div class="row-title text-sm text-primary">${escapeHtml(title)}</div>
-              <div class="text-xs text-green">@${escapeHtml(entry.requestedBy)} · ${timeAgo(entry.at)}</div>
-              ${entry.reason ? `<div class="activity-reason">${escapeHtml(entry.reason)}</div>` : ''}
-            </div>
+        <div class="row-item">
+          <div class="row-info">
+            <div class="text-sm text-primary truncate">${escapeHtml(title)}</div>
+            ${entry.reason ? `<div class="text-sm text-muted truncate">${escapeHtml(entry.reason)}</div>` : ''}
           </div>
-          <span class="status-pill ${entry.status}">${entry.status}</span>
+          
+          <div class="text-sm text-secondary">${formatTime(entry.at)}</div>
+          <div class="text-sm text-green">@${escapeHtml(entry.requestedBy)}</div>
+          <span class="text-xs text-bold status-pill ${entry.status}">${entry.status}</span>
         </div>
       `
     })
@@ -314,14 +335,8 @@ function renderActivity() {
 }
 
 function renderStats() {
-  if (dom.statQueueLength) dom.statQueueLength.textContent = state.queue.length
-
-  const accepted = state.activity.filter((e) => e.status === 'accepted').length
-  const rejected = state.activity.filter((e) => e.status === 'rejected').length
-
-  if (dom.statAcceptedToday) dom.statAcceptedToday.textContent = accepted
-  if (dom.statRejectedToday) dom.statRejectedToday.textContent = rejected
-  if (dom.statFallbackCount) dom.statFallbackCount.textContent = state.fallback?.sourceCount ?? 0
+  if (dom.tabJamCount) dom.tabJamCount.textContent = state.fallback?.sourceCount ?? 0
+  if (dom.tabRecentCount) dom.tabRecentCount.textContent = state.activity.length
 }
 
 async function loadPreviewSettings() {
@@ -501,20 +516,18 @@ function renderState() {
 function renderCurrent() {
   if (!state.current) {
     dom.nowPlaying.classList.add('hidden')
-    dom.noPlaying.style.display = 'block'
+    dom.noPlaying.classList.remove('hidden')
     return
   }
 
   dom.nowPlaying.classList.remove('hidden')
-  dom.noPlaying.style.display = 'none'
+  dom.noPlaying.classList.add('hidden')
 
-  dom.currentThumbnail.src = state.current.thumbnail
-  dom.currentThumbnail.alt = state.current.title
   dom.currentTitle.textContent = state.current.title
   dom.currentChannel.textContent = state.current.channelTitle
-  dom.currentViews.textContent = `${formatViews(state.current.views)} views`
   dom.currentDuration.textContent = formatDuration(state.current.duration)
-  dom.currentRequester.textContent = `@${state.current.requestedBy}`
+  dom.currentViews.textContent = formatViews(state.current.views) + ' views'
+  dom.currentRequester.textContent = state.current.requestedBy
 }
 
 function renderNext() {
@@ -524,12 +537,8 @@ function renderNext() {
   }
 
   dom.nextPlaying.classList.remove('hidden')
-  dom.nextThumbnail.src = state.nextTrack.thumbnail
-  dom.nextThumbnail.alt = state.nextTrack.title
   dom.nextTitle.textContent = state.nextTrack.title
-  dom.nextChannel.textContent = state.nextTrack.channelTitle
   dom.nextDuration.textContent = formatDuration(state.nextTrack.duration)
-  dom.nextRequester.textContent = state.nextTrack.source === 'queue' ? `@${state.nextTrack.requestedBy}` : '@Jam'
 }
 
 let lastQueueKey = ''
@@ -538,6 +547,7 @@ function renderQueue() {
   const maxQueueSize = state.config?.maxQueueSize ?? 0
 
   dom.queueCount.textContent = `${state.queue.length}/${maxQueueSize}`
+  if (dom.tabQueueCount) dom.tabQueueCount.textContent = state.queue.length
 
   const queueKey = state.queue.map((item) => `${item.videoId}:${item.requestedBy}`).join('|')
 
@@ -554,25 +564,18 @@ function renderQueue() {
   dom.queueList.innerHTML = state.queue
     .map(
       (item, index) => `
-        <div class="row-wrapper" data-queue-index="${index}">
-          <div class="row flex-1">
-            <span class="text-secondary">#${index + 1}</span>
-            <img src="${escapeHtml(item.thumbnail)}" class="thumbnail" alt="${escapeHtml(item.title)}">
-            <div class="row-info">
-              <div class="row-title text-sm text-primary">${escapeHtml(item.title)}</div>
-              <div class="text-xs text-green">@${escapeHtml(item.requestedBy)}</div>
-            </div>
-            <span class="text-sm text-secondary">${formatDuration(item.duration)}</span>
+        <div class="row-item" data-queue-index="${index}">
+          <span class="row-index text-sm text-secondary text-bold">${index + 1}</span>
+          <img src="${escapeHtml(item.thumbnail)}" class="thumbnail" alt="${escapeHtml(item.title)}">
+          <div class="row-info">
+            <div class="text-sm text-primary truncate">${escapeHtml(item.title)}</div>
+            <div class="text-xs text-secondary truncate">${escapeHtml(item.channelTitle)}</div>
           </div>
-
-          <button
-            class="row-tag btn btn-icon btn-danger"
-            data-action="remove"
-            data-index="${index}"
-            aria-label="Remove from queue"
-          >
-            ${DELETE_ICON}
-          </button>
+          <span class="text-sm text-green">@${escapeHtml(item.requestedBy)}</span>
+          <span class="text-sm text-secondary">${formatDuration(item.duration)}</span>
+          <div class="row-ctrl">
+            <button class="btn btn-sm btn-icon" data-action="remove" data-index="${index}" aria-label="Remove from queue">${DELETE_ICON}</button>
+          </div>
         </div>
       `
     )
@@ -604,7 +607,7 @@ function syncPlayer() {
 
 function renderPlayPause() {
   dom.playPauseBtn.title = state.isPaused ? 'Resume' : 'Pause'
-  dom.playPauseBtn.innerHTML = state.isPaused ? PLAY_ICON : PAUSE_ICON
+  dom.playPauseBtn.innerHTML = state.isPaused ? PLAY_ICON() : PAUSE_ICON
 }
 
 async function playPauseCurrent() {
@@ -637,7 +640,7 @@ function showSearchError(message) {
 
 function clearSearchResults() {
   dom.searchResults.innerHTML = ''
-  dom.searchResults.classList.add('hidden')
+  dom.searchResultsWrapper.classList.add('hidden')
   dom.searchError.classList.add('hidden')
 }
 
@@ -679,20 +682,22 @@ function renderSearchResults(results) {
   dom.searchResults.innerHTML = results
     .map(
       (song) => `
-        <div class="row-wrapper row-hover" data-action="add" data-video-id="${escapeHtml(song.videoId)}">
+        <div class="row-item">
           <img src="${escapeHtml(song.thumbnail)}" class="thumbnail" alt="${escapeHtml(song.title)}">
           <div class="row-info">
-            <div class="row-title text-sm text-primary">${escapeHtml(song.title)}</div>
-            <div class="text-xs text-secondary">${escapeHtml(song.channelTitle)}</div>
+            <div class="text-sm text-primary truncate">${escapeHtml(song.title)}</div>
+            <div class="text-xs text-secondary truncate">${escapeHtml(song.channelTitle)}</div>
           </div>
           <span class="text-sm text-secondary">${formatDuration(song.duration)}</span>
-          <div class="row-tag">${PLUS_ICON}</div>
+          <div class="row-ctrl">
+            <button class="btn btn-sm btn-icon" data-action="add" data-video-id="${escapeHtml(song.videoId)}">${PLUS_ICON}</button>
+          </div>
         </div>
       `
     )
     .join('')
 
-  dom.searchResults.classList.remove('hidden')
+  dom.searchResultsWrapper.classList.remove('hidden')
 }
 
 async function addSong(query) {
@@ -759,7 +764,8 @@ function renderFallback() {
 
     dom.fallbackShuffleBtn.classList.remove('active')
     dom.fallbackRepeatBtn.classList.remove('active')
-    dom.fallbackEnabledToggle.checked = false
+    dom.fallbackEnabledBtn.classList.remove('active')
+    dom.fallbackEnabledText.textContent = 'Off'
     lastFallbackKey = ''
     renderStats()
     return
@@ -778,8 +784,10 @@ function renderFallback() {
 
   dom.fallbackShuffleBtn.classList.toggle('active', data.shuffle)
   dom.fallbackRepeatBtn.classList.toggle('active', data.repeat)
-  dom.fallbackEnabledToggle.checked = data.enabled
-  dom.fallbackInfo.textContent = `${data.upNext.length} треков · обновлён ${formattedDate}`
+  dom.fallbackEnabledBtn.classList.toggle('active', data.enabled)
+  dom.fallbackEnabledText.textContent = data.enabled ? 'Off' : 'On'
+
+  dom.fallbackInfo.textContent = `${data.upNext.length} tracks ▪ updated ${formattedDate}`
   renderStats()
 
   const fallbackKey = `${data.activeVideoId}|${data.upNext.map((t) => `${t.videoId}:${t.isPlayed}`).join(',')}`
@@ -792,18 +800,16 @@ function renderFallback() {
       const rowClass = isActive ? 'row-active' : track.isPlayed ? 'row-played' : ''
 
       return `
-        <div class="row-wrapper ${rowClass}" data-video-id="${escapeHtml(track.videoId)}">
-          <div class="row flex-1">
-            <img src="${escapeHtml(track.thumbnail)}" class="thumbnail" alt="${escapeHtml(track.title)}">
-            <div class="row-info">
-              <div class="row-title text-sm text-primary">${escapeHtml(track.title)}</div>
-              <div class="text-xs text-secondary">${escapeHtml(track.channelTitle)}</div>
-            </div>
-            <span class="text-sm text-secondary">${formatDuration(track.duration)}</span>
+        <div class="row-item ${rowClass}" data-video-id="${escapeHtml(track.videoId)}">
+          <img src="${escapeHtml(track.thumbnail)}" class="thumbnail" alt="${escapeHtml(track.title)}">
+          <div class="row-info">
+            <div class="text-sm text-primary truncate">${escapeHtml(track.title)}</div>
+            <div class="text-xs text-secondary truncate">${escapeHtml(track.channelTitle)}</div>
           </div>
-          <div class="row-tag row">
-            <button class="btn btn-icon" data-action="fallback-enqueue" data-video-id="${escapeHtml(track.videoId)}" title="Add to queue">${PLUS_ICON}</button>
-            <button class="btn btn-icon" data-action="fallback-play" data-video-id="${escapeHtml(track.videoId)}" title="Play now">${PLAY_ICON}</button>
+          <span class="text-sm text-secondary">${formatDuration(track.duration)}</span>
+          <div class="row-ctrl">
+            <button class="btn btn-sm btn-icon" data-action="fallback-enqueue" data-video-id="${escapeHtml(track.videoId)}" title="Add to queue">${PLUS_ICON}</button>
+            <button class="btn btn-sm btn-icon" data-action="fallback-play" data-video-id="${escapeHtml(track.videoId)}" title="Play now">${PLAY_ICON(20)}</button>
           </div>
         </div>
       `
@@ -857,7 +863,6 @@ async function toggleFallbackEnabled() {
     state.fallback = await api.enabledFallback()
     renderFallback()
   } catch (error) {
-    dom.fallbackEnabledToggle.checked = !dom.fallbackEnabledToggle.checked
     log('Failed to toggle enabled:', error)
   }
 }
@@ -919,19 +924,17 @@ function renderPlaylists() {
     .map((playlist) => {
       const isActive = playlist.id === activeId
       return `
-        <div class="row-wrapper ${isActive ? 'row-active' : ''}">
-          <div class="row flex-1">
-            <img src="${escapeHtml(playlist.thumbnail)}" class="thumbnail" alt="${escapeHtml(playlist.title)}">
-            <div class="row-info">
-              <div class="row-title text-sm text-primary">${escapeHtml(playlist.title)}</div>
-              <div class="text-xs text-secondary">${playlist.itemCount} tracks${isActive ? ' · active' : ''}</div>
-            </div>
+        <div class="row-item ${isActive ? 'row-active' : ''}">
+          <img src="${escapeHtml(playlist.thumbnail)}" class="thumbnail" alt="${escapeHtml(playlist.title)}">
+          <div class="row-info">
+            <div class=" text-sm text-primary">${escapeHtml(playlist.title)}</div>
+            <div class="text-xs text-secondary">${playlist.itemCount} tracks${isActive ? ' · active' : ''}</div>
           </div>
-          <div class="row-tag row">
-            <button class="btn btn-icon ${isActive ? 'active' : ''}" data-action="playlist-activate" data-id="${escapeHtml(playlist.id)}" title="${isActive ? 'Active' : 'Activate'}">
-              ${isActive ? CHECK_ICON : PLAY_ICON}
+          <div class="row-ctrl">
+            <button class="btn btn-sm btn-icon ${isActive ? 'active' : ''}" data-action="playlist-activate" data-id="${escapeHtml(playlist.id)}" title="${isActive ? 'Active' : 'Activate'}">
+              ${isActive ? CHECK_ICON : PLAY_ICON(20)}
             </button>
-            <button class="btn btn-icon btn-danger" data-action="playlist-delete" data-id="${escapeHtml(playlist.id)}" title="Delete">${DELETE_ICON}</button>
+            <button class="btn btn-sm btn-icon btn-danger" data-action="playlist-delete" data-id="${escapeHtml(playlist.id)}" title="Delete">${DELETE_ICON}</button>
           </div>
         </div>
       `
@@ -999,7 +1002,7 @@ dom.playlistUrlInput?.addEventListener('keydown', (event) => {
 
 document.querySelectorAll('.btn-tab').forEach((el) => {
   el.addEventListener('click', (event) => {
-    switchTab(el.dataset.tabTarget)
+    switchPageTab(el.dataset.pageTabTarget)
   })
 })
 
@@ -1018,11 +1021,11 @@ dom.queueList?.addEventListener('click', (event) => {
 })
 
 dom.searchResults?.addEventListener('click', (event) => {
-  const result = event.target.closest('[data-action="add"]')
+  const button = event.target.closest('[data-action="add"]')
 
-  if (!result) return
+  if (!button) return
 
-  const videoId = result.dataset.videoId
+  const videoId = button.dataset.videoId
 
   if (videoId) {
     addSong(`https://www.youtube.com/watch?v=${videoId}`)

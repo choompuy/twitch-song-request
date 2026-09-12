@@ -39,7 +39,6 @@ body {
   width: 100%;
   padding: 0.5rem 0.75rem;
   gap: 0.5rem;
-  background: var(--bg-panel);
   border-radius: var(--radius-sm);
   z-index: 10;
 }
@@ -77,13 +76,6 @@ body {
 .now-playing .text {
   flex: 1;
   overflow: hidden;
-}
-
-.now-playing .thumbnail {
-  width: 4rem;
-  height: 4rem;
-  border-radius: var(--radius-sm);
-  object-fit: cover;
 }
 
 .now-playing .title {

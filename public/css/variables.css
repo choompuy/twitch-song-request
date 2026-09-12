@@ -2,18 +2,24 @@
   --radius-sm: 0.5rem;
   --radius-md: 0.75rem;
 
-  --bg: #0f0f13;
-  --bg-panel: #1a1a1e;
-  --bg-elevated: #2a2a30;
-  --bg-hover: #3a3a40;
+  --bg: #0d1012;
+  --bg-elevated: #15191b;
+  --bg-hover: #1e2326;
+
+  --border: #2e353b;
 
   --text-primary: #e0e0e0;
-  --text-secondary: #888;
+  --text-secondary: #a1a1a1;
   --text-muted: #666;
 
-  --accent-blue: #3b82f6;
-  --accent-blue-hover: #396dc0;
+  --accent-blue: #3b9cf6;
+  --accent-blue-bg: #263d52;
+  --accent-blue-hover: #3485d1;
+
   --accent-green: #4caf50;
+  --accent-green-bg: #122213;
+
   --accent-red: #ff4d4d;
-  --accent-red-hover: #612929;
+  --accent-red-bg: #241416;
+  --accent-red-hover: #461d1d;
 }
