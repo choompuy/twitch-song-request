@@ -37,10 +37,12 @@ import {
   toggleFallbackShuffle,
   toggleFallbackRepeat,
   toggleFallbackEnabled,
+  clearFallback,
   playFallbackTrackNow,
   queueFallbackTrack,
   logActivity,
-  getActivity
+  getActivity,
+  clearActivity
 } from './queue.js'
 
 const app = express()
@@ -107,9 +109,7 @@ function parseYouTubeUrl(input: string): { isYouTube: boolean; videoId: string |
 function isValidVideoId(value: string | null | undefined): value is string {
   return Boolean(value && /^[a-zA-Z0-9_-]{11}$/.test(value))
 }
-
-const PLAYLIST_ID_PATTERN =
-  /^(PL[A-Za-z0-9_-]{16,}|RD[A-Za-z0-9_-]{11}|UU[A-Za-z0-9_-]{16,}|LL[A-Za-z0-9_-]{16,}|FL[A-Za-z0-9_-]{16,}|OL[A-Za-z0-9_-]{16,})$/
+const PLAYLIST_ID_PATTERN = /^(PL|RD|UU|LL|FL|OL)[A-Za-z0-9_-]+$/
 
 function parsePlaylistId(input: string): string | null {
   const trimmed = input.trim()
@@ -241,7 +241,15 @@ app.delete('/api/playlists/:id', (req, res) => {
   if (!removed) {
     return fail(res, 'плейлист не найден', 'PLAYLIST_NOT_FOUND', 404)
   }
-  ok(res, { playlists: getPlaylists() })
+
+  const wasActive = getConfig().fallbackPlaylist.playlistId === req.params.id
+
+  if (wasActive) {
+    clearFallback()
+    log(`[PLAYLISTS] active playlist "${req.params.id}" removed - fallback cleared`)
+  }
+
+  ok(res, { playlists: getPlaylists(), fallbackCleared: wasActive })
 })
 
 app.post('/api/playlists/:id/activate', async (req, res) => {
@@ -275,6 +283,11 @@ app.get('/api/search', async (req, res) => {
 })
 
 app.get('/api/activity', (_req, res) => {
+  ok<ActivityResponse>(res, { entries: getActivity() })
+})
+
+app.post('/api/activity/clear', (_req, res) => {
+  clearActivity()
   ok<ActivityResponse>(res, { entries: getActivity() })
 })
 

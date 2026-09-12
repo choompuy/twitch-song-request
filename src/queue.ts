@@ -45,6 +45,11 @@ export function getActivity(): ActivityEntry[] {
   return [...activityLog]
 }
 
+export function clearActivity(): void {
+  activityLog.length = 0
+  log('[ACTIVITY] cleared')
+}
+
 let fallbackSourceTracks: Song[] = []
 let fallbackOrder: string[] = []
 let fallbackCursor = -1
@@ -237,6 +242,21 @@ export function toggleFallbackEnabled(): FallbackStateResponse {
   const enabled = !config.fallbackPlaylist.enabled
   updateConfig({ fallbackPlaylist: { ...config.fallbackPlaylist, enabled } })
   log(`[FALLBACK] Enabled: ${enabled}`)
+  return getFallbackState()
+}
+
+export function clearFallback(): FallbackStateResponse {
+  fallbackSourceTracks = []
+  fallbackOrder = []
+  fallbackCursor = -1
+  loadedFallbackPlaylistId = null
+  lastFallbackRefreshAt = null
+
+  const config = getConfig()
+  updateConfig({ fallbackPlaylist: { ...config.fallbackPlaylist, playlistId: null } })
+
+  log('[FALLBACK] cleared')
+  saveState()
   return getFallbackState()
 }
 
